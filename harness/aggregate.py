@@ -115,7 +115,11 @@ def summarize(cfg: dict) -> list[dict]:
             "quant": man["quant"],
             "constrained": int(constrained),
             "ngl": man.get("ngl"),
-            "fits_8gb": int(man.get("ngl") == 99),
+            # Fits = every layer on the GPU AND the weights themselves within the 8 GB
+            # budget (EVAL_PLAN §2, DEVIATIONS D3). ngl alone is not enough: on Windows
+            # llama.cpp accepted ngl=99 for the two 8+ GB models and the driver spilled
+            # to shared system memory, so ngl==99 does not imply the model fit.
+            "fits_8gb": int(man.get("ngl") == 99 and man.get("gguf_bytes", 0) <= 8e9),
             "gguf_gb": round(man.get("gguf_bytes", 0) / 1e9, 2),
             "peak_vram_mib": summ.get("vram_peak_mib"),
             "load_s": man.get("load_seconds"),
@@ -201,7 +205,7 @@ def write_markdown(rows: list[dict]) -> None:
     for r in rows:
         lines.append(
             f"| {r['model']} | {r['quant']} | {'on' if r['constrained'] else 'off'} | "
-            f"{'yes' if r['fits_8gb'] else f'no (ngl={r['ngl']})'} | "
+            f"{'yes' if r['fits_8gb'] else f'no ({r['gguf_gb']} GB weights, ngl={r['ngl']})'} | "
             f"{r['peak_vram_mib']} MiB | {pct(r['t1_acc'])} | {pct(r['t2_success'])} | "
             f"{pct(r['t2_recovery'])} | "
             f"{'—' if r['decode_tps_median'] is None else f'{r['decode_tps_median']:.1f}'} |")

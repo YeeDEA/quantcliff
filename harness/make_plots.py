@@ -107,7 +107,7 @@ def fig_collapse(rows: list[dict]) -> None:
         for x, q in zip(xs, quants):
             r = pick(rows, model, q, 0)
             if r and not int(r["fits_8gb"]):
-                ax.annotate("partial\noffload", (x, 3), ha="center", fontsize=7,
+                ax.annotate("weights\n> 8 GB", (x, 3), ha="center", fontsize=7,
                             color="#888888")
         ax.set_xticks(list(xs))
         ax.set_xticklabels(quants, rotation=20)

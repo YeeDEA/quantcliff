@@ -58,10 +58,16 @@ pre-sweep chain check, before the locked matrix was run.
 
 `Meta-Llama-3.1-8B-Instruct-Q8_0` (8.54 GB) and `Qwen3-4B-Instruct-2507-bf16`
 (8.05 GB) exceed the 8 GB VRAM budget before any KV cache is allocated. Per
-`EVAL_PLAN.md` §2 these are **not excluded**: the runner falls back down an
-`n_gpu_layers` ladder (99 → 32 → 20), records the effective value in each config's
-manifest, and the summary marks `fits_8gb = 0`. Their latency numbers therefore
-reflect partial CPU offload and are not comparable to fully-offloaded configs —
+`EVAL_PLAN.md` §2 these are **not excluded**: the runner was set to fall back down an
+`n_gpu_layers` ladder (99 → 32 → 20) and record the effective value in each config's
+manifest. **Correction (post-publication):** the fallback never triggered — llama.cpp
+accepted `ngl = 99` for both models, and peak VRAM sat at the ceiling (7822 / 7818 MiB)
+while decode fell to 5.9 / 8.1 tok/s, consistent with the Windows driver spilling into
+shared system memory rather than a layer offload. The original aggregator derived
+`fits_8gb` from `ngl == 99` alone and therefore marked both as fitting; it now also
+requires weights ≤ 8 GB, and `summary.md` / `summary.csv` / the figures were regenerated
+(no accuracy or throughput value changed, only the flag). Their latency numbers are
+not comparable to configs that genuinely fit —
 tables and plots flag them, and the README states this explicitly. "This model
 does not fit a consumer 8 GB GPU" is a result, not a gap.
 
@@ -158,3 +164,21 @@ as raw data (`results/raw/llama-3.1-8b_Q8_0_ctx4096.jsonl`, log
 `results/diag_ctx4096.log`) for anyone who wants to check it.
 
 **Date:** 2026-08-20, after the locked matrix completed.
+
+---
+
+## D6 — Planned measurements that were not delivered (recorded post-publication)
+
+`EVAL_PLAN.md` promised four things that do not appear in the results. They were not
+produced, and this entry exists so that the gap is stated rather than discovered:
+
+| Planned (EVAL_PLAN.md) | Status |
+|---|---|
+| §3 T1: BFCL checker "validated by hand on 20 random items before the sweep" | No record of the hand check survives in the repo |
+| §3 T2: LLM judge as a secondary annotator, agreement with rules and with 50 hand-labeled trajectories reported | Not run — all failure labels in `FAILURES.md` / `failures.csv` are the rule-based primary labels only |
+| §4: decode tok/s reported as **median ± IQR** | Only the median is reported (`summary.md`, "tok/s (median)") |
+| §4: analytic memory-budget table (weights + KV cache vs context) | Not produced; the closest evidence is peak VRAM per config and the D5 context-halving diagnostic |
+
+None of these changes a reported number. They narrow what the results can claim: failure
+categories are rule-assigned without an inter-annotator check, and throughput has no
+spread attached.
