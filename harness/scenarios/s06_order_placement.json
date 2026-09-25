@@ -1,0 +1,163 @@
+{
+  "id": "s06_order_placement",
+  "domain": "e-commerce",
+  "task": "Place an order for 2 units of the CHEAPEST wireless keyboard that is currently in stock (in_stock must be greater than 0) in the store catalog. Apply the store-wide coupon code SAVE10 to the cart, then check out with EXPRESS shipping paying with the card visa-4421. Checkout requires you to pass the exact amount you expect to be charged, including the shipping fee. Report the order confirmation id.",
+  "max_steps": 10,
+  "data": {
+    "catalog": {
+      "wireless keyboard": [
+        {"product_id": "KB-100", "name": "Aster Slim Wireless Keyboard", "price_usd": 39.0, "in_stock": 0},
+        {"product_id": "KB-220", "name": "Nimbus Compact Wireless Keyboard", "price_usd": 48.5, "in_stock": 5},
+        {"product_id": "KB-330", "name": "Orbit Pro Wireless Keyboard", "price_usd": 55.0, "in_stock": 12}
+      ]
+    },
+    "products": {
+      "KB-100": {"product_id": "KB-100", "price_usd": 39.0, "in_stock": 0},
+      "KB-220": {"product_id": "KB-220", "price_usd": 48.5, "in_stock": 5},
+      "KB-330": {"product_id": "KB-330", "price_usd": 55.0, "in_stock": 12}
+    },
+    "coupons": {"SAVE10": 0.10},
+    "shipping_fees": {"standard": 0.0, "express": 12.0}
+  },
+  "initial_state": {},
+  "tools": [
+    {
+      "name": "search_catalog",
+      "description": "Search the store catalog by product category keyword. Returns product_id, price and in_stock for each match.",
+      "parameters": {
+        "type": "object",
+        "properties": {"query": {"type": "string", "description": "category keyword, e.g. 'wireless keyboard'"}},
+        "required": ["query"]
+      },
+      "behavior": {"result": "data['catalog'][args['query']]"}
+    },
+    {
+      "name": "add_to_cart",
+      "description": "Add a quantity of one product to the cart. Fails if the requested quantity exceeds available stock. Returns the cart subtotal.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "product_id": {"type": "string", "description": "product_id from search_catalog"},
+          "qty": {"type": "integer", "description": "number of units"}
+        },
+        "required": ["product_id", "qty"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "args['product_id'] in data['products']", "error": "Unknown product_id."},
+          {"cond": "args['qty'] > 0", "error": "qty must be positive."},
+          {"cond": "args['qty'] <= data['products'][args['product_id']]['in_stock']", "error": "Requested quantity exceeds available stock for this product."}
+        ],
+        "effect": {
+          "cart_product": "args['product_id']",
+          "cart_qty": "args['qty']",
+          "cart_subtotal": "round(data['products'][args['product_id']]['price_usd'] * args['qty'], 2)",
+          "cart_total": "round(data['products'][args['product_id']]['price_usd'] * args['qty'], 2)"
+        },
+        "result": "{'product_id': args['product_id'], 'qty': args['qty'], 'subtotal_usd': round(data['products'][args['product_id']]['price_usd'] * args['qty'], 2)}"
+      }
+    },
+    {
+      "name": "apply_coupon",
+      "description": "Apply a discount coupon code to the current cart. Returns the discounted cart total (before shipping).",
+      "parameters": {
+        "type": "object",
+        "properties": {"code": {"type": "string", "description": "coupon code"}},
+        "required": ["code"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "get(state, 'cart_subtotal', 0) > 0", "error": "Cart is empty; add an item before applying a coupon."},
+          {"cond": "args['code'] in data['coupons']", "error": "Unknown or expired coupon code."}
+        ],
+        "effect": {
+          "coupon_applied": "args['code']",
+          "cart_total": "round(state['cart_subtotal'] * (1 - data['coupons'][args['code']]), 2)"
+        },
+        "result": "{'code': args['code'], 'cart_total_usd': round(state['cart_subtotal'] * (1 - data['coupons'][args['code']]), 2)}"
+      }
+    },
+    {
+      "name": "checkout",
+      "description": "Check out the current cart. expected_total_usd must equal the discounted cart total plus the shipping fee for the chosen shipping_speed, rounded to 2 decimals. Returns the order confirmation id.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "expected_total_usd": {"type": "number", "description": "amount you expect to be charged, including shipping"},
+          "shipping_speed": {"type": "string", "enum": ["standard", "express"]},
+          "payment_method": {"type": "string", "description": "card token on file"}
+        },
+        "required": ["expected_total_usd", "shipping_speed", "payment_method"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "get(state, 'cart_total', 0) > 0", "error": "Cart is empty."},
+          {"cond": "get(state, 'coupon_applied', '') == 'SAVE10'", "error": "The SAVE10 coupon has not been applied to this cart yet."},
+          {"cond": "args['payment_method'] == 'visa-4421'", "error": "No such payment method on file."},
+          {"cond": "args['expected_total_usd'] == round(state['cart_total'] + data['shipping_fees'][args['shipping_speed']], 2)", "error": "expected_total_usd does not match the amount that would be charged (cart total plus shipping fee)."}
+        ],
+        "effect": {
+          "order_id": "'ORD-7781'",
+          "order_charged_usd": "args['expected_total_usd']",
+          "order_shipping": "args['shipping_speed']"
+        },
+        "result": "{'order_id': 'ORD-7781', 'charged_usd': args['expected_total_usd'], 'shipping_speed': args['shipping_speed']}"
+      }
+    },
+    {
+      "name": "get_gift_wrap_options",
+      "description": "List available gift wrapping styles and their prices.",
+      "parameters": {
+        "type": "object",
+        "properties": {"region": {"type": "string"}},
+        "required": ["region"]
+      },
+      "distractor": true,
+      "distractor_reply": "3 gift wrap styles available. (Gift wrapping is not part of this task.)"
+    },
+    {
+      "name": "subscribe_newsletter",
+      "description": "Subscribe an email address to the store newsletter.",
+      "parameters": {
+        "type": "object",
+        "properties": {"email": {"type": "string"}},
+        "required": ["email"]
+      },
+      "distractor": true,
+      "distractor_reply": "Subscribed. (Newsletter signup has no effect on the order.)"
+    },
+    {
+      "name": "read_product_reviews",
+      "description": "Read customer reviews for a product.",
+      "parameters": {
+        "type": "object",
+        "properties": {"product_id": {"type": "string"}},
+        "required": ["product_id"]
+      },
+      "distractor": true,
+      "distractor_reply": "Average rating 4.3 from 512 reviews."
+    }
+  ],
+  "error_injection": {
+    "tool": "checkout",
+    "nth_call": 1,
+    "message": "Payment authorization timed out (gateway 504). No charge was made; please retry checkout."
+  },
+  "oracle": [
+    {"action": "search_catalog", "args": {"query": "wireless keyboard"}},
+    {"action": "add_to_cart", "args": {"product_id": "KB-220", "qty": 2}},
+    {"action": "apply_coupon", "args": {"code": "SAVE10"}},
+    {"action": "checkout", "args": {"expected_total_usd": 99.3, "shipping_speed": "express", "payment_method": "visa-4421"}}
+  ],
+  "goal": {
+    "conditions": [
+      "get(state, 'cart_product', '') == 'KB-220'",
+      "get(state, 'cart_qty', 0) == 2",
+      "get(state, 'coupon_applied', '') == 'SAVE10'",
+      "get(state, 'order_id', '') == 'ORD-7781'",
+      "get(state, 'order_shipping', '') == 'express'",
+      "get(state, 'order_charged_usd', 0) == 99.3"
+    ],
+    "answer_contains": ["'ORD-7781'"]
+  }
+}

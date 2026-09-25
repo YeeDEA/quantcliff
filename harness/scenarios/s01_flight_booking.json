@@ -1,0 +1,130 @@
+{
+  "id": "s01_flight_booking",
+  "domain": "travel",
+  "task": "Book the cheapest DIRECT flight from ICN to SFO on 2026-09-15 for passenger Yongjun Choi (passport M12345678). After booking, reserve an airport shuttle pickup matching the flight's arrival time. Report the booking reference and the total flight price.",
+  "max_steps": 10,
+  "data": {
+    "flights": {
+      "ICN|SFO|2026-09-15": [
+        {"flight_id": "UA892", "price_usd": 850, "direct": false, "arrives": "21:40"},
+        {"flight_id": "KE023", "price_usd": 890, "direct": true, "arrives": "17:30"},
+        {"flight_id": "OZ212", "price_usd": 940, "direct": true, "arrives": "19:10"}
+      ]
+    },
+    "bookings": {
+      "UA892": {"booking_ref": "BR-3310", "price_usd": 850},
+      "KE023": {"booking_ref": "BR-7741", "price_usd": 890},
+      "OZ212": {"booking_ref": "BR-9902", "price_usd": 940}
+    },
+    "arrivals": {"UA892": "21:40", "KE023": "17:30", "OZ212": "19:10"}
+  },
+  "initial_state": {},
+  "tools": [
+    {
+      "name": "search_flights",
+      "description": "Search available flights for a route and date.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "origin": {"type": "string", "description": "IATA airport code, e.g. 'ICN'"},
+          "dest": {"type": "string", "description": "IATA airport code, e.g. 'SFO'"},
+          "date": {"type": "string", "description": "YYYY-MM-DD"}
+        },
+        "required": ["origin", "dest", "date"]
+      },
+      "behavior": {
+        "result": "data['flights'][args['origin'] + '|' + args['dest'] + '|' + args['date']]"
+      }
+    },
+    {
+      "name": "book_flight",
+      "description": "Book a flight by flight_id for one passenger. Returns the booking reference and charged price.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "flight_id": {"type": "string", "description": "flight_id from search_flights"},
+          "passenger_name": {"type": "string"},
+          "passport": {"type": "string"}
+        },
+        "required": ["flight_id", "passenger_name", "passport"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "args['flight_id'] in data['bookings']", "error": "Unknown flight_id."},
+          {"cond": "args['passport'] == 'M12345678'", "error": "Passport does not match any passenger profile."}
+        ],
+        "effect": {
+          "booked_flight": "args['flight_id']",
+          "booking_ref": "data['bookings'][args['flight_id']]['booking_ref']"
+        },
+        "result": "data['bookings'][args['flight_id']]"
+      }
+    },
+    {
+      "name": "reserve_shuttle",
+      "description": "Reserve an airport shuttle pickup for an existing flight booking. pickup_time must match the flight's arrival time (HH:MM).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "booking_ref": {"type": "string"},
+          "pickup_time": {"type": "string", "description": "HH:MM, must equal the booked flight's arrival time"}
+        },
+        "required": ["booking_ref", "pickup_time"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "get(state, 'booking_ref', '') == args['booking_ref']", "error": "No such booking."},
+          {"cond": "args['pickup_time'] == data['arrivals'][state['booked_flight']]", "error": "No shuttle available at that time."}
+        ],
+        "effect": {"shuttle_time": "args['pickup_time']", "shuttle_confirm": "'SH-220'"},
+        "result": "{'confirmation': 'SH-220', 'pickup_time': args['pickup_time']}"
+      }
+    },
+    {
+      "name": "search_hotels",
+      "description": "Search hotels in a city for a check-in date.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "city": {"type": "string"},
+          "checkin": {"type": "string", "description": "YYYY-MM-DD"}
+        },
+        "required": ["city", "checkin"]
+      },
+      "distractor": true,
+      "distractor_reply": "12 hotels found. (Hotel booking is not part of this task.)"
+    },
+    {
+      "name": "get_weather",
+      "description": "Get the weather forecast for a city and date.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "city": {"type": "string"},
+          "date": {"type": "string"}
+        },
+        "required": ["city", "date"]
+      },
+      "distractor": true,
+      "distractor_reply": "Sunny, 22C."
+    }
+  ],
+  "error_injection": {
+    "tool": "book_flight",
+    "nth_call": 1,
+    "message": "Payment gateway timeout. Please retry the booking."
+  },
+  "oracle": [
+    {"action": "search_flights", "args": {"origin": "ICN", "dest": "SFO", "date": "2026-09-15"}},
+    {"action": "book_flight", "args": {"flight_id": "KE023", "passenger_name": "Yongjun Choi", "passport": "M12345678"}},
+    {"action": "reserve_shuttle", "args": {"booking_ref": "BR-7741", "pickup_time": "17:30"}}
+  ],
+  "goal": {
+    "conditions": [
+      "get(state, 'booked_flight', '') == 'KE023'",
+      "get(state, 'booking_ref', '') == 'BR-7741'",
+      "get(state, 'shuttle_time', '') == '17:30'"
+    ],
+    "answer_contains": ["'BR-7741'", "890"]
+  }
+}

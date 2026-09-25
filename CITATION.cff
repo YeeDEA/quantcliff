@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use this benchmark or its results, please cite it as below."
+title: "QuantCliff: Multi-Step Tool-Calling Under Weight Quantization, Measured on a Consumer 8 GB GPU"
+authors:
+  - family-names: Choi
+    given-names: Yongjun
+type: software
+repository-code: "https://github.com/YeeDEA/quantcliff"
+license: MIT
+version: 0.1.0
+date-released: 2026-08-20
+keywords:
+  - quantization
+  - tool-calling
+  - llm-agents
+  - evaluation
+  - on-device
+  - llama.cpp

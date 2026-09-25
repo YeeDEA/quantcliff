@@ -1,0 +1,165 @@
+{
+  "id": "s08_return_label",
+  "domain": "logistics",
+  "task": "A customer's parcel with tracking number 1Z8842X arrived damaged. Track the parcel to find its order, then issue a return label for ONLY the single MOST EXPENSIVE item in that order, with the reason DAMAGED. Eligibility must be verified for that item before a label can be created. Finally, schedule a carrier pickup on the earliest available pickup date offered for that label. Report the return label id.",
+  "max_steps": 10,
+  "data": {
+    "tracking": {
+      "1Z8842X": {"tracking_number": "1Z8842X", "order_id": "ORD-5521", "carrier": "UPS", "status": "delivered", "delivered_on": "2026-08-14"}
+    },
+    "order_items": {
+      "ORD-5521": [
+        {"sku": "SKU-A1", "name": "USB-C cable 1m", "price_usd": 9.99},
+        {"sku": "SKU-B2", "name": "ANC headphones", "price_usd": 199.0},
+        {"sku": "SKU-C3", "name": "Laptop sleeve 14in", "price_usd": 29.5}
+      ]
+    },
+    "eligibility": {
+      "ORD-5521|SKU-A1": {"eligible": true, "window_days_left": 16},
+      "ORD-5521|SKU-B2": {"eligible": true, "window_days_left": 16},
+      "ORD-5521|SKU-C3": {"eligible": false, "window_days_left": 0}
+    },
+    "labels": {"ORD-5521|SKU-B2": "RMA-3390", "ORD-5521|SKU-A1": "RMA-3391"},
+    "pickup_dates": {
+      "RMA-3390": ["2026-08-24", "2026-08-26", "2026-08-27"],
+      "RMA-3391": ["2026-08-25", "2026-08-28"]
+    }
+  },
+  "initial_state": {},
+  "tools": [
+    {
+      "name": "track_package",
+      "description": "Look up a parcel by tracking number. Returns the carrier, delivery status, delivery date and the order id it belongs to.",
+      "parameters": {
+        "type": "object",
+        "properties": {"tracking_number": {"type": "string"}},
+        "required": ["tracking_number"]
+      },
+      "behavior": {"result": "data['tracking'][args['tracking_number']]"}
+    },
+    {
+      "name": "get_order_items",
+      "description": "List the line items of an order, with sku, name and unit price.",
+      "parameters": {
+        "type": "object",
+        "properties": {"order_id": {"type": "string", "description": "order_id from track_package"}},
+        "required": ["order_id"]
+      },
+      "behavior": {"result": "data['order_items'][args['order_id']]"}
+    },
+    {
+      "name": "check_return_eligibility",
+      "description": "Check whether one line item of a delivered order can still be returned. Must be called for an item before a return label can be created for it.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "order_id": {"type": "string"},
+          "sku": {"type": "string"}
+        },
+        "required": ["order_id", "sku"]
+      },
+      "behavior": {
+        "effect": {
+          "checked_key": "args['order_id'] + '|' + args['sku']",
+          "checked_eligible": "data['eligibility'][args['order_id'] + '|' + args['sku']]['eligible']"
+        },
+        "result": "data['eligibility'][args['order_id'] + '|' + args['sku']]"
+      }
+    },
+    {
+      "name": "create_return_label",
+      "description": "Create a prepaid return label for one eligible line item. Requires that check_return_eligibility was run for exactly this order_id and sku and returned eligible.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "order_id": {"type": "string"},
+          "sku": {"type": "string"},
+          "reason": {"type": "string", "enum": ["damaged", "wrong_item", "no_longer_needed", "late_delivery"]}
+        },
+        "required": ["order_id", "sku", "reason"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "get(state, 'checked_key', '') == args['order_id'] + '|' + args['sku']", "error": "Return eligibility has not been checked for this order and sku."},
+          {"cond": "get(state, 'checked_eligible', False) == True", "error": "This item is outside its return window and cannot be returned."}
+        ],
+        "effect": {
+          "label_id": "data['labels'][args['order_id'] + '|' + args['sku']]",
+          "label_sku": "args['sku']",
+          "label_reason": "args['reason']"
+        },
+        "result": "{'label_id': data['labels'][args['order_id'] + '|' + args['sku']], 'sku': args['sku'], 'reason': args['reason'], 'available_pickup_dates': data['pickup_dates'][data['labels'][args['order_id'] + '|' + args['sku']]]}"
+      }
+    },
+    {
+      "name": "schedule_pickup",
+      "description": "Schedule a carrier pickup for an existing return label. pickup_date must be one of the dates offered for that label.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "label_id": {"type": "string", "description": "label_id from create_return_label"},
+          "pickup_date": {"type": "string", "description": "YYYY-MM-DD, must be an offered pickup date"}
+        },
+        "required": ["label_id", "pickup_date"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "get(state, 'label_id', '') == args['label_id']", "error": "No such return label."},
+          {"cond": "args['pickup_date'] in data['pickup_dates'][args['label_id']]", "error": "The carrier offers no pickup on that date for this label."}
+        ],
+        "effect": {"pickup_date": "args['pickup_date']"},
+        "result": "{'label_id': args['label_id'], 'pickup_date': args['pickup_date'], 'status': 'pickup_scheduled'}"
+      }
+    },
+    {
+      "name": "estimate_shipping_cost",
+      "description": "Estimate outbound shipping cost between two postal codes.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "from_zip": {"type": "string"},
+          "to_zip": {"type": "string"},
+          "weight_kg": {"type": "number"}
+        },
+        "required": ["from_zip", "to_zip", "weight_kg"]
+      },
+      "distractor": true,
+      "distractor_reply": "Estimated 8.40 USD. (Return labels are prepaid; this estimate is irrelevant.)"
+    },
+    {
+      "name": "file_carrier_claim",
+      "description": "File a damage claim against the carrier for a delivered parcel.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "tracking_number": {"type": "string"},
+          "claim_type": {"type": "string", "enum": ["lost", "damaged", "delayed"]}
+        },
+        "required": ["tracking_number", "claim_type"]
+      },
+      "distractor": true,
+      "distractor_reply": "Claim CLM-2210 opened. (A carrier claim does not create a return label.)"
+    }
+  ],
+  "error_injection": {
+    "tool": "create_return_label",
+    "nth_call": 1,
+    "message": "Label printing service returned a transient error (502 from label broker). Please retry creating the return label."
+  },
+  "oracle": [
+    {"action": "track_package", "args": {"tracking_number": "1Z8842X"}},
+    {"action": "get_order_items", "args": {"order_id": "ORD-5521"}},
+    {"action": "check_return_eligibility", "args": {"order_id": "ORD-5521", "sku": "SKU-B2"}},
+    {"action": "create_return_label", "args": {"order_id": "ORD-5521", "sku": "SKU-B2", "reason": "damaged"}},
+    {"action": "schedule_pickup", "args": {"label_id": "RMA-3390", "pickup_date": "2026-08-24"}}
+  ],
+  "goal": {
+    "conditions": [
+      "get(state, 'label_sku', '') == 'SKU-B2'",
+      "get(state, 'label_reason', '') == 'damaged'",
+      "get(state, 'label_id', '') == 'RMA-3390'",
+      "get(state, 'pickup_date', '') == '2026-08-24'"
+    ],
+    "answer_contains": ["'RMA-3390'", "'2026-08-24'"]
+  }
+}

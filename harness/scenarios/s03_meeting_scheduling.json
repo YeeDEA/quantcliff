@@ -1,0 +1,181 @@
+{
+  "id": "s03_meeting_scheduling",
+  "domain": "calendar",
+  "task": "Schedule a 60-minute design review for the 'platform' team on 2026-09-03. Use the EARLIEST slot that day on which every team member is free AND a meeting room whose capacity is at least the full team size is available. Book it with priority 'high', then send the invites to all team members. Report the meeting id and the booked start time.",
+  "max_steps": 10,
+  "data": {
+    "teams": {
+      "platform": {"team_id": "platform", "members": ["u-101", "u-102", "u-103"], "size": 3}
+    },
+    "slots": {
+      "2026-09-03|60": [
+        {"slot": "09:00", "free_members": ["u-101", "u-102", "u-103"], "all_free": true},
+        {"slot": "11:00", "free_members": ["u-101", "u-102"], "all_free": false},
+        {"slot": "13:30", "free_members": ["u-101", "u-102", "u-103"], "all_free": true},
+        {"slot": "16:00", "free_members": ["u-101", "u-103"], "all_free": false}
+      ]
+    },
+    "all_free": {
+      "2026-09-03|09:00": true,
+      "2026-09-03|11:00": false,
+      "2026-09-03|13:30": true,
+      "2026-09-03|16:00": false
+    },
+    "rooms": {
+      "2026-09-03|09:00": [{"room_id": "R-1", "capacity": 2}],
+      "2026-09-03|11:00": [{"room_id": "R-4", "capacity": 6}],
+      "2026-09-03|13:30": [{"room_id": "R-2", "capacity": 2}, {"room_id": "R-4", "capacity": 6}],
+      "2026-09-03|16:00": [{"room_id": "R-4", "capacity": 6}]
+    },
+    "room_capacity": {
+      "2026-09-03|09:00|R-1": 2,
+      "2026-09-03|11:00|R-4": 6,
+      "2026-09-03|13:30|R-2": 2,
+      "2026-09-03|13:30|R-4": 6,
+      "2026-09-03|16:00|R-4": 6
+    }
+  },
+  "initial_state": {},
+  "tools": [
+    {
+      "name": "get_team",
+      "description": "Look up a team by id. Returns the member user ids and the team size.",
+      "parameters": {
+        "type": "object",
+        "properties": {"team_id": {"type": "string", "description": "e.g. 'platform'"}},
+        "required": ["team_id"]
+      },
+      "behavior": {
+        "effect": {"team_size": "data['teams'][args['team_id']]['size']"},
+        "result": "data['teams'][args['team_id']]"
+      }
+    },
+    {
+      "name": "find_slots",
+      "description": "List candidate start times on a date for a meeting of the given length, with the members who are free in each slot.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "date": {"type": "string", "description": "YYYY-MM-DD"},
+          "duration_min": {"type": "integer", "description": "meeting length in minutes"}
+        },
+        "required": ["date", "duration_min"]
+      },
+      "behavior": {
+        "result": "data['slots'][args['date'] + '|' + str(args['duration_min'])]"
+      }
+    },
+    {
+      "name": "list_rooms",
+      "description": "List the meeting rooms that are still free at a given date and start time, with their seating capacity.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "date": {"type": "string", "description": "YYYY-MM-DD"},
+          "slot": {"type": "string", "description": "start time, HH:MM"}
+        },
+        "required": ["date", "slot"]
+      },
+      "behavior": {
+        "result": "data['rooms'][args['date'] + '|' + args['slot']]"
+      }
+    },
+    {
+      "name": "book_meeting",
+      "description": "Book a room for a team meeting. Requires that the team roster has already been looked up, that every member is free in that slot, and that the room's capacity is at least the team size.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "team_id": {"type": "string"},
+          "date": {"type": "string", "description": "YYYY-MM-DD"},
+          "slot": {"type": "string", "description": "start time, HH:MM"},
+          "room_id": {"type": "string", "description": "room_id from list_rooms"},
+          "priority": {"type": "string", "enum": ["low", "normal", "high"]}
+        },
+        "required": ["team_id", "date", "slot", "room_id", "priority"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "get(state, 'team_size', 0) > 0", "error": "Team roster unknown: look up the team before booking."},
+          {"cond": "data['all_free'][args['date'] + '|' + args['slot']] == True", "error": "At least one team member is busy in that slot."},
+          {"cond": "data['room_capacity'][args['date'] + '|' + args['slot'] + '|' + args['room_id']] >= state['team_size']", "error": "That room is too small for the whole team."}
+        ],
+        "effect": {
+          "booked_slot": "args['slot']",
+          "booked_room": "args['room_id']",
+          "priority": "args['priority']",
+          "meeting_id": "'MTG-4821'"
+        },
+        "result": "{'meeting_id': 'MTG-4821', 'slot': args['slot'], 'room_id': args['room_id'], 'priority': args['priority']}"
+      }
+    },
+    {
+      "name": "send_invites",
+      "description": "Send calendar invites for a booked meeting. attendees must list every member of the team.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "meeting_id": {"type": "string"},
+          "attendees": {"type": "array", "items": {"type": "string"}, "description": "user ids from get_team"}
+        },
+        "required": ["meeting_id", "attendees"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "get(state, 'meeting_id', '') == args['meeting_id']", "error": "No such booked meeting."},
+          {"cond": "len(args['attendees']) == state['team_size']", "error": "attendees must contain every team member."},
+          {"cond": "all(['u-101' in args['attendees'], 'u-102' in args['attendees'], 'u-103' in args['attendees']])", "error": "attendees must contain every team member."}
+        ],
+        "effect": {"invites_sent": "True"},
+        "result": "{'sent': True, 'count': len(args['attendees'])}"
+      }
+    },
+    {
+      "name": "check_holidays",
+      "description": "Check whether a date is a company holiday.",
+      "parameters": {
+        "type": "object",
+        "properties": {"date": {"type": "string"}},
+        "required": ["date"]
+      },
+      "distractor": true,
+      "distractor_reply": "2026-09-03 is a normal working day."
+    },
+    {
+      "name": "order_catering",
+      "description": "Order catering for a meeting.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "meeting_id": {"type": "string"},
+          "headcount": {"type": "integer"}
+        },
+        "required": ["meeting_id", "headcount"]
+      },
+      "distractor": true,
+      "distractor_reply": "Catering request logged. (Catering is not part of this task.)"
+    }
+  ],
+  "error_injection": {
+    "tool": "book_meeting",
+    "nth_call": 1,
+    "message": "Calendar service returned 429 (rate limited). Please retry the booking."
+  },
+  "oracle": [
+    {"action": "get_team", "args": {"team_id": "platform"}},
+    {"action": "find_slots", "args": {"date": "2026-09-03", "duration_min": 60}},
+    {"action": "list_rooms", "args": {"date": "2026-09-03", "slot": "09:00"}},
+    {"action": "list_rooms", "args": {"date": "2026-09-03", "slot": "13:30"}},
+    {"action": "book_meeting", "args": {"team_id": "platform", "date": "2026-09-03", "slot": "13:30", "room_id": "R-4", "priority": "high"}},
+    {"action": "send_invites", "args": {"meeting_id": "MTG-4821", "attendees": ["u-101", "u-102", "u-103"]}}
+  ],
+  "goal": {
+    "conditions": [
+      "get(state, 'booked_slot', '') == '13:30'",
+      "get(state, 'booked_room', '') == 'R-4'",
+      "get(state, 'priority', '') == 'high'",
+      "get(state, 'invites_sent', False) == True"
+    ],
+    "answer_contains": ["'MTG-4821'", "'13:30'"]
+  }
+}

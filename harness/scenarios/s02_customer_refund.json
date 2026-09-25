@@ -1,0 +1,120 @@
+{
+  "id": "s02_customer_refund",
+  "domain": "customer-support",
+  "task": "Customer jane.park@example.com reports that order A-1092 arrived damaged. Look up her customer record, verify the order, issue a FULL refund to her original payment method, and send her a confirmation email whose body mentions the exact refund amount. Report the refund id.",
+  "max_steps": 12,
+  "data": {
+    "customers": {
+      "jane.park@example.com": {"customer_id": "C-334", "name": "Jane Park", "tier": "gold"}
+    },
+    "orders": {
+      "A-1092": {"order_id": "A-1092", "customer_id": "C-334", "total_usd": 129.99, "status": "delivered", "payment_method": "visa-4421"}
+    }
+  },
+  "initial_state": {},
+  "tools": [
+    {
+      "name": "find_customer",
+      "description": "Look up a customer record by email address.",
+      "parameters": {
+        "type": "object",
+        "properties": {"email": {"type": "string"}},
+        "required": ["email"]
+      },
+      "behavior": {"result": "data['customers'][args['email']]"}
+    },
+    {
+      "name": "get_order",
+      "description": "Fetch an order by order id, including total and payment method.",
+      "parameters": {
+        "type": "object",
+        "properties": {"order_id": {"type": "string"}},
+        "required": ["order_id"]
+      },
+      "behavior": {"result": "data['orders'][args['order_id']]"}
+    },
+    {
+      "name": "issue_refund",
+      "description": "Issue a refund for an order. For full refunds, amount_usd must equal the order total exactly, and payment_method must match the order's original payment method.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "order_id": {"type": "string"},
+          "amount_usd": {"type": "number"},
+          "payment_method": {"type": "string"}
+        },
+        "required": ["order_id", "amount_usd", "payment_method"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "args['order_id'] in data['orders']", "error": "Unknown order id."},
+          {"cond": "args['amount_usd'] == data['orders'][args['order_id']]['total_usd']", "error": "Refund amount must equal the order total for a full refund."},
+          {"cond": "args['payment_method'] == data['orders'][args['order_id']]['payment_method']", "error": "payment_method does not match the order's original payment method."}
+        ],
+        "effect": {"refund_issued": "True", "refund_id": "'RF-5567'"},
+        "result": "{'refund_id': 'RF-5567', 'amount_usd': args['amount_usd'], 'status': 'refunded'}"
+      }
+    },
+    {
+      "name": "send_email",
+      "description": "Send an email. Use only after the refund is issued; the body must state the refunded amount.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "to": {"type": "string"},
+          "subject": {"type": "string"},
+          "body": {"type": "string"}
+        },
+        "required": ["to", "subject", "body"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "get(state, 'refund_issued', False) == True", "error": "Nothing to confirm: no refund has been issued yet."},
+          {"cond": "args['to'] == 'jane.park@example.com'", "error": "Unknown recipient."},
+          {"cond": "'129.99' in args['body']", "error": "Confirmation email body must state the refunded amount."}
+        ],
+        "effect": {"email_sent": "True"},
+        "result": "{'delivered': True}"
+      }
+    },
+    {
+      "name": "create_ticket",
+      "description": "Create an internal support ticket.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "subject": {"type": "string"},
+          "priority": {"type": "string", "enum": ["low", "medium", "high"]}
+        },
+        "required": ["subject", "priority"]
+      },
+      "distractor": true,
+      "distractor_reply": "Ticket T-8801 created. (Ticketing is not required for this task.)"
+    },
+    {
+      "name": "list_promotions",
+      "description": "List currently active store promotions.",
+      "parameters": {"type": "object", "properties": {}, "required": []},
+      "distractor": true,
+      "distractor_reply": "No active promotions."
+    }
+  ],
+  "error_injection": {
+    "tool": "issue_refund",
+    "nth_call": 1,
+    "message": "Refund service temporarily unavailable (503). Please retry."
+  },
+  "oracle": [
+    {"action": "find_customer", "args": {"email": "jane.park@example.com"}},
+    {"action": "get_order", "args": {"order_id": "A-1092"}},
+    {"action": "issue_refund", "args": {"order_id": "A-1092", "amount_usd": 129.99, "payment_method": "visa-4421"}},
+    {"action": "send_email", "args": {"to": "jane.park@example.com", "subject": "Your refund is confirmed", "body": "We have refunded 129.99 USD for order A-1092."}}
+  ],
+  "goal": {
+    "conditions": [
+      "get(state, 'refund_issued', False) == True",
+      "get(state, 'email_sent', False) == True"
+    ],
+    "answer_contains": ["'RF-5567'"]
+  }
+}

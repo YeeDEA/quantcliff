@@ -1,0 +1,163 @@
+{
+  "id": "s19_library_hold",
+  "domain": "library",
+  "task": "Member Dana Whitlock (library card LC-77310) wants the 2019 HARDCOVER edition of 'Tidal Mechanics' by E. Karrow. Search the catalog, check that copy's circulation status, and get it reserved for her: if the copy is already checked out, a checkout is impossible and you must place a hold instead. Then set the pickup branch on the hold to the branch that owns the copy. Report the hold id and the pickup branch code.",
+  "max_steps": 9,
+  "data": {
+    "catalog": {
+      "Tidal Mechanics": [
+        {"copy_id": "CP-4401", "edition_year": 2012, "format": "paperback", "owning_branch": "BR-EAST"},
+        {"copy_id": "CP-4488", "edition_year": 2019, "format": "hardcover", "owning_branch": "BR-WEST"},
+        {"copy_id": "CP-4502", "edition_year": 2019, "format": "paperback", "owning_branch": "BR-NORTH"},
+        {"copy_id": "CP-4610", "edition_year": 2023, "format": "hardcover", "owning_branch": "BR-EAST"}
+      ]
+    },
+    "circulation": {
+      "CP-4401": {"copy_id": "CP-4401", "status": "on_shelf", "owning_branch": "BR-EAST", "due_date": null},
+      "CP-4488": {"copy_id": "CP-4488", "status": "checked_out", "owning_branch": "BR-WEST", "due_date": "2026-09-11"},
+      "CP-4502": {"copy_id": "CP-4502", "status": "on_shelf", "owning_branch": "BR-NORTH", "due_date": null},
+      "CP-4610": {"copy_id": "CP-4610", "status": "on_shelf", "owning_branch": "BR-EAST", "due_date": null}
+    },
+    "branches": {"BR-EAST": "East Row Branch", "BR-WEST": "Westgate Branch", "BR-NORTH": "Northfield Branch"}
+  },
+  "initial_state": {},
+  "tools": [
+    {
+      "name": "search_catalog",
+      "description": "Search the catalog by exact title. Returns every physical copy with its edition year, format and owning branch.",
+      "parameters": {
+        "type": "object",
+        "properties": {"title": {"type": "string", "description": "exact book title"}},
+        "required": ["title"]
+      },
+      "behavior": {"result": "data['catalog'][args['title']]"}
+    },
+    {
+      "name": "get_copy_status",
+      "description": "Get the circulation status of one copy ('on_shelf' or 'checked_out'), its owning branch and due date.",
+      "parameters": {
+        "type": "object",
+        "properties": {"copy_id": {"type": "string", "description": "copy_id from search_catalog"}},
+        "required": ["copy_id"]
+      },
+      "behavior": {"result": "data['circulation'][args['copy_id']]"}
+    },
+    {
+      "name": "checkout_copy",
+      "description": "Check a copy out to a member immediately. Only works for copies whose status is 'on_shelf'.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "copy_id": {"type": "string"},
+          "card_number": {"type": "string"}
+        },
+        "required": ["copy_id", "card_number"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "args['card_number'] == 'LC-77310'", "error": "Library card not recognized."},
+          {"cond": "data['circulation'][args['copy_id']]['status'] == 'on_shelf'", "error": "Copy is checked out and cannot be issued; place a hold instead."}
+        ],
+        "effect": {"checked_out_copy": "args['copy_id']"},
+        "result": "{'copy_id': args['copy_id'], 'loan_id': 'LN-2200'}"
+      }
+    },
+    {
+      "name": "place_hold",
+      "description": "Place a hold on a copy for a member. Only allowed when the copy is currently checked out. Returns a hold id.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "copy_id": {"type": "string"},
+          "card_number": {"type": "string"}
+        },
+        "required": ["copy_id", "card_number"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "args['card_number'] == 'LC-77310'", "error": "Library card not recognized."},
+          {"cond": "data['circulation'][args['copy_id']]['status'] == 'checked_out'", "error": "This copy is on the shelf; holds are only accepted for copies that are checked out."}
+        ],
+        "effect": {"hold_copy": "args['copy_id']", "hold_id": "'HLD-51862'"},
+        "result": "{'hold_id': 'HLD-51862', 'copy_id': args['copy_id'], 'queue_position': 1}"
+      }
+    },
+    {
+      "name": "set_hold_pickup",
+      "description": "Set the pickup branch on an existing hold. The branch code must be the branch that owns the held copy.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "hold_id": {"type": "string"},
+          "branch_code": {"type": "string", "description": "e.g. 'BR-EAST'"}
+        },
+        "required": ["hold_id", "branch_code"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "get(state, 'hold_id', '') == args['hold_id']", "error": "No such hold."},
+          {"cond": "args['branch_code'] in data['branches']", "error": "Unknown branch code."},
+          {"cond": "args['branch_code'] == data['circulation'][state['hold_copy']]['owning_branch']", "error": "Pickup branch must be the branch that owns the held copy."}
+        ],
+        "effect": {"pickup_branch": "args['branch_code']"},
+        "result": "{'hold_id': args['hold_id'], 'pickup_branch': args['branch_code'], 'branch_name': data['branches'][args['branch_code']]}"
+      }
+    },
+    {
+      "name": "renew_loan",
+      "description": "Renew an existing loan for a member.",
+      "parameters": {
+        "type": "object",
+        "properties": {"loan_id": {"type": "string"}},
+        "required": ["loan_id"]
+      },
+      "distractor": true,
+      "distractor_reply": "No renewals pending on this account. (Renewals are unrelated to this request.)"
+    },
+    {
+      "name": "pay_fines",
+      "description": "Pay outstanding fines on a member account.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "card_number": {"type": "string"},
+          "amount_usd": {"type": "number"}
+        },
+        "required": ["card_number", "amount_usd"]
+      },
+      "distractor": true,
+      "distractor_reply": "Account balance is 0.00; nothing to pay. (No fines are involved here.)"
+    },
+    {
+      "name": "list_branch_hours",
+      "description": "List opening hours for a library branch.",
+      "parameters": {
+        "type": "object",
+        "properties": {"branch_code": {"type": "string"}},
+        "required": ["branch_code"]
+      },
+      "distractor": true,
+      "distractor_reply": "Mon-Sat 09:00-19:00. (Hours are not needed to place a hold.)"
+    }
+  ],
+  "error_injection": {
+    "tool": "place_hold",
+    "nth_call": 1,
+    "message": "Holds queue is being rebuilt (temporary lock). Please retry in a moment."
+  },
+  "oracle": [
+    {"action": "search_catalog", "args": {"title": "Tidal Mechanics"}},
+    {"action": "get_copy_status", "args": {"copy_id": "CP-4488"}},
+    {"action": "place_hold", "args": {"copy_id": "CP-4488", "card_number": "LC-77310"}},
+    {"action": "set_hold_pickup", "args": {"hold_id": "HLD-51862", "branch_code": "BR-WEST"}}
+  ],
+  "goal": {
+    "conditions": [
+      "get(state, 'hold_copy', '') == 'CP-4488'",
+      "get(state, 'hold_id', '') == 'HLD-51862'",
+      "get(state, 'pickup_branch', '') == 'BR-WEST'",
+      "get(state, 'checked_out_copy', '') == ''"
+    ],
+    "answer_contains": ["'HLD-51862'", "'BR-WEST'"]
+  }
+}

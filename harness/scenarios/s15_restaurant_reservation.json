@@ -1,0 +1,155 @@
+{
+  "id": "s15_restaurant_reservation",
+  "domain": "restaurant-reservation",
+  "task": "Book a dinner table for a party of exactly 5 guests on 2026-09-12. Search the KOREAN restaurants in the Riverside district, then at that restaurant pick the EARLIEST slot in the OUTDOOR seating area whose table capacity can seat 5. Reserve it for guest Mina Seol (phone 010-4477-2001), then send her an SMS whose text includes the reservation code. Report the reservation code and the reserved time.",
+  "max_steps": 9,
+  "data": {
+    "restaurants": {
+      "korean|Riverside": [
+        {"restaurant_id": "R-77", "name": "Hanok Ember", "cuisine": "korean", "district": "Riverside", "price_band": "$$"}
+      ],
+      "italian|Riverside": [
+        {"restaurant_id": "R-31", "name": "Vela Rossa", "cuisine": "italian", "district": "Riverside", "price_band": "$$$"}
+      ]
+    },
+    "slots": {
+      "R-77|2026-09-12": [
+        {"slot_id": "S-1", "time": "18:00", "area": "outdoor", "table_capacity": 4},
+        {"slot_id": "S-2", "time": "18:30", "area": "indoor", "table_capacity": 8},
+        {"slot_id": "S-3", "time": "19:30", "area": "outdoor", "table_capacity": 6},
+        {"slot_id": "S-4", "time": "20:30", "area": "outdoor", "table_capacity": 6}
+      ]
+    },
+    "slot_info": {
+      "S-1": {"time": "18:00", "area": "outdoor", "table_capacity": 4},
+      "S-2": {"time": "18:30", "area": "indoor", "table_capacity": 8},
+      "S-3": {"time": "19:30", "area": "outdoor", "table_capacity": 6},
+      "S-4": {"time": "20:30", "area": "outdoor", "table_capacity": 6}
+    },
+    "codes": {"S-1": "RS-4101", "S-2": "RS-4155", "S-3": "RS-4182", "S-4": "RS-4199"}
+  },
+  "initial_state": {},
+  "tools": [
+    {
+      "name": "search_restaurants",
+      "description": "Search restaurants by cuisine and district. Returns restaurant records including restaurant_id.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "cuisine": {"type": "string", "enum": ["korean", "italian", "thai"], "description": "cuisine category"},
+          "district": {"type": "string", "description": "district name, e.g. 'Riverside'"}
+        },
+        "required": ["cuisine", "district"]
+      },
+      "behavior": {
+        "result": "data['restaurants'][args['cuisine'] + '|' + args['district']]"
+      }
+    },
+    {
+      "name": "list_slots",
+      "description": "List bookable dinner slots for a restaurant on a date. Each slot has a slot_id, time, seating area and the table capacity of that slot.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "restaurant_id": {"type": "string", "description": "restaurant_id from search_restaurants"},
+          "date": {"type": "string", "description": "YYYY-MM-DD"}
+        },
+        "required": ["restaurant_id", "date"]
+      },
+      "behavior": {
+        "result": "data['slots'][args['restaurant_id'] + '|' + args['date']]"
+      }
+    },
+    {
+      "name": "reserve_table",
+      "description": "Reserve a specific slot for a party. party_size must not exceed the slot's table capacity. Returns the reservation code.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "slot_id": {"type": "string", "description": "slot_id from list_slots"},
+          "party_size": {"type": "integer", "description": "exact number of guests"},
+          "guest_name": {"type": "string"},
+          "phone": {"type": "string"}
+        },
+        "required": ["slot_id", "party_size", "guest_name", "phone"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "args['slot_id'] in data['slot_info']", "error": "Unknown slot_id."},
+          {"cond": "args['party_size'] <= data['slot_info'][args['slot_id']]['table_capacity']", "error": "Party size exceeds the table capacity of this slot."},
+          {"cond": "args['phone'] == '010-4477-2001'", "error": "Phone number does not match the guest profile on file."}
+        ],
+        "effect": {
+          "reserved_slot": "args['slot_id']",
+          "reserved_time": "data['slot_info'][args['slot_id']]['time']",
+          "party_size": "args['party_size']",
+          "reservation_code": "data['codes'][args['slot_id']]"
+        },
+        "result": "{'reservation_code': data['codes'][args['slot_id']], 'time': data['slot_info'][args['slot_id']]['time'], 'area': data['slot_info'][args['slot_id']]['area'], 'party_size': args['party_size']}"
+      }
+    },
+    {
+      "name": "send_sms",
+      "description": "Send an SMS to the guest. Only works after a reservation exists; the text must contain the reservation code.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "phone": {"type": "string"},
+          "text": {"type": "string", "description": "message body, must include the reservation code"}
+        },
+        "required": ["phone", "text"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "get(state, 'reservation_code', '') != ''", "error": "No reservation exists yet."},
+          {"cond": "args['phone'] == '010-4477-2001'", "error": "Unknown recipient."},
+          {"cond": "state['reservation_code'] in args['text']", "error": "The SMS text must contain the reservation code."}
+        ],
+        "effect": {"guest_notified": "True"},
+        "result": "{'delivered': True}"
+      }
+    },
+    {
+      "name": "get_restaurant_reviews",
+      "description": "Fetch recent diner reviews and the average rating for a restaurant.",
+      "parameters": {
+        "type": "object",
+        "properties": {"restaurant_id": {"type": "string"}},
+        "required": ["restaurant_id"]
+      },
+      "distractor": true,
+      "distractor_reply": "Average rating 4.3 from 218 reviews. (Reviews do not affect this booking.)"
+    },
+    {
+      "name": "find_parking",
+      "description": "Find parking garages near a district.",
+      "parameters": {
+        "type": "object",
+        "properties": {"district": {"type": "string"}},
+        "required": ["district"]
+      },
+      "distractor": true,
+      "distractor_reply": "3 garages found within 400m. (Parking is not part of this task.)"
+    }
+  ],
+  "error_injection": {
+    "tool": "reserve_table",
+    "nth_call": 1,
+    "message": "Reservation system busy (429). The slot is still held; please retry."
+  },
+  "oracle": [
+    {"action": "search_restaurants", "args": {"cuisine": "korean", "district": "Riverside"}},
+    {"action": "list_slots", "args": {"restaurant_id": "R-77", "date": "2026-09-12"}},
+    {"action": "reserve_table", "args": {"slot_id": "S-3", "party_size": 5, "guest_name": "Mina Seol", "phone": "010-4477-2001"}},
+    {"action": "send_sms", "args": {"phone": "010-4477-2001", "text": "Your table for 5 at Hanok Ember is confirmed for 19:30. Reservation code RS-4182."}}
+  ],
+  "goal": {
+    "conditions": [
+      "get(state, 'reserved_slot', '') == 'S-3'",
+      "get(state, 'party_size', 0) == 5",
+      "get(state, 'reservation_code', '') == 'RS-4182'",
+      "get(state, 'guest_notified', False) == True"
+    ],
+    "answer_contains": ["'RS-4182'", "'19:30'"]
+  }
+}

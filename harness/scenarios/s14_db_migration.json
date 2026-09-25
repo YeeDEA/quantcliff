@@ -1,0 +1,197 @@
+{
+  "id": "s14_db_migration",
+  "domain": "database-admin",
+  "task": "In database analytics_prod, find the table whose description says it stores exactly one row per customer subscription renewal. Inspect that table, take a full backup of it (our policy forbids running any migration on a table without a fresh backup), then apply migration M-2026-08-03 to it, and finally verify the table's row count AFTER the migration has been applied. Report the backup id and the verified row count.",
+  "max_steps": 10,
+  "data": {
+    "tables": {
+      "analytics_prod": [
+        {"table": "customer_accounts", "description": "One row per customer account, current state only."},
+        {"table": "billing_cycle_events", "description": "One row per customer subscription renewal, append only."},
+        {"table": "invoice_lines", "description": "One row per line item on an issued invoice."},
+        {"table": "session_pings", "description": "One row per client heartbeat, retained 14 days."}
+      ]
+    },
+    "schemas": {
+      "analytics_prod|billing_cycle_events": {
+        "table": "billing_cycle_events",
+        "columns": ["event_id", "customer_id", "renewed_at", "plan_code", "amount_usd"],
+        "primary_key": "event_id",
+        "engine": "columnar"
+      },
+      "analytics_prod|customer_accounts": {
+        "table": "customer_accounts",
+        "columns": ["customer_id", "email", "plan_code"],
+        "primary_key": "customer_id",
+        "engine": "row"
+      }
+    },
+    "backup_ids": {
+      "analytics_prod|billing_cycle_events": "BK-7731",
+      "analytics_prod|customer_accounts": "BK-7732"
+    },
+    "migrations": {
+      "M-2026-08-03": {
+        "migration_id": "M-2026-08-03",
+        "target_database": "analytics_prod",
+        "target_table": "billing_cycle_events",
+        "description": "Backfill plan_code on renewals imported before the plan split, dropping 3 orphaned rows."
+      }
+    },
+    "row_counts": {
+      "analytics_prod|billing_cycle_events|before": 41253,
+      "analytics_prod|billing_cycle_events|M-2026-08-03": 41250,
+      "analytics_prod|customer_accounts|before": 8140
+    }
+  },
+  "initial_state": {},
+  "tools": [
+    {
+      "name": "list_tables",
+      "description": "List the tables in a database with a one-line description of each.",
+      "parameters": {
+        "type": "object",
+        "properties": {"database": {"type": "string"}},
+        "required": ["database"]
+      },
+      "behavior": {"result": "data['tables'][args['database']]"}
+    },
+    {
+      "name": "describe_table",
+      "description": "Show the columns, primary key and storage engine of one table.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "database": {"type": "string"},
+          "table": {"type": "string"}
+        },
+        "required": ["database", "table"]
+      },
+      "behavior": {"result": "data['schemas'][args['database'] + '|' + args['table']]"}
+    },
+    {
+      "name": "create_backup",
+      "description": "Take a full backup of one table. Returns the backup id. Required before any migration touches the table.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "database": {"type": "string"},
+          "table": {"type": "string"}
+        },
+        "required": ["database", "table"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "args['database'] + '|' + args['table'] in data['backup_ids']", "error": "Cannot back up: no such table."}
+        ],
+        "effect": {
+          "backed_up_table": "args['table']",
+          "backup_id": "data['backup_ids'][args['database'] + '|' + args['table']]"
+        },
+        "result": "{'backup_id': data['backup_ids'][args['database'] + '|' + args['table']], 'table': args['table'], 'consistent': True}"
+      }
+    },
+    {
+      "name": "apply_migration",
+      "description": "Apply a migration to its target table. Refuses to run unless a fresh backup of that exact table exists in this session.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "database": {"type": "string"},
+          "table": {"type": "string"},
+          "migration_id": {"type": "string"}
+        },
+        "required": ["database", "table", "migration_id"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "args['migration_id'] in data['migrations']", "error": "Unknown migration id."},
+          {"cond": "args['table'] == data['migrations'][args['migration_id']]['target_table']", "error": "This migration does not target that table."},
+          {"cond": "args['database'] == data['migrations'][args['migration_id']]['target_database']", "error": "This migration does not target that database."},
+          {"cond": "get(state, 'backed_up_table', '') == args['table']", "error": "Policy violation: no fresh backup exists for this table. Take a backup before migrating."}
+        ],
+        "effect": {"migration_applied": "args['migration_id']"},
+        "result": "{'migration_id': args['migration_id'], 'status': 'applied', 'table': args['table']}"
+      }
+    },
+    {
+      "name": "count_rows",
+      "description": "Count the rows currently in a table. The number reflects whichever migrations have already been applied.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "database": {"type": "string"},
+          "table": {"type": "string"}
+        },
+        "required": ["database", "table"]
+      },
+      "behavior": {
+        "effect": {
+          "verified_count": "data['row_counts'][args['database'] + '|' + args['table'] + '|' + get(state, 'migration_applied', 'before')]",
+          "counted_table": "args['table']"
+        },
+        "result": "{'table': args['table'], 'row_count': data['row_counts'][args['database'] + '|' + args['table'] + '|' + get(state, 'migration_applied', 'before')]}"
+      }
+    },
+    {
+      "name": "explain_query",
+      "description": "Return the query plan for an SQL statement without executing it.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "database": {"type": "string"},
+          "sql": {"type": "string"}
+        },
+        "required": ["database", "sql"]
+      },
+      "distractor": true,
+      "distractor_reply": "Plan: sequential scan, estimated cost 1204.5. (Query planning is not part of this task.)"
+    },
+    {
+      "name": "reindex_table",
+      "description": "Rebuild the indexes of a table.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "database": {"type": "string"},
+          "table": {"type": "string"}
+        },
+        "required": ["database", "table"]
+      },
+      "distractor": true,
+      "distractor_reply": "Indexes rebuilt. (Reindexing neither backs up nor migrates anything.)"
+    },
+    {
+      "name": "list_connections",
+      "description": "List active client connections to a database.",
+      "parameters": {
+        "type": "object",
+        "properties": {"database": {"type": "string"}},
+        "required": ["database"]
+      },
+      "distractor": true,
+      "distractor_reply": "17 active connections. (Not relevant to this task.)"
+    }
+  ],
+  "error_injection": {
+    "tool": "apply_migration",
+    "nth_call": 1,
+    "message": "Migration aborted: could not acquire table lock within 5s (deadlock detected). Transient — please retry."
+  },
+  "oracle": [
+    {"action": "list_tables", "args": {"database": "analytics_prod"}},
+    {"action": "describe_table", "args": {"database": "analytics_prod", "table": "billing_cycle_events"}},
+    {"action": "create_backup", "args": {"database": "analytics_prod", "table": "billing_cycle_events"}},
+    {"action": "apply_migration", "args": {"database": "analytics_prod", "table": "billing_cycle_events", "migration_id": "M-2026-08-03"}},
+    {"action": "count_rows", "args": {"database": "analytics_prod", "table": "billing_cycle_events"}}
+  ],
+  "goal": {
+    "conditions": [
+      "get(state, 'backup_id', '') == 'BK-7731'",
+      "get(state, 'migration_applied', '') == 'M-2026-08-03'",
+      "get(state, 'counted_table', '') == 'billing_cycle_events'",
+      "get(state, 'verified_count', 0) == 41250"
+    ],
+    "answer_contains": ["'BK-7731'", "41250"]
+  }
+}

@@ -1,0 +1,162 @@
+{
+  "id": "s17_event_tickets",
+  "domain": "event-ticketing",
+  "task": "Buy 3 STANDARD seats for a show in Rivermoor on 2026-10-03. Only shows that offer English subtitles AND have at least 3 standard seats still available are eligible; among the eligible shows choose the one with the LOWEST standard seat price. Purchase for buyer Dana Ruiz, then set ticket delivery to e_ticket. Report the purchase reference and the amount charged.",
+  "max_steps": 10,
+  "data": {
+    "shows": {
+      "Rivermoor|2026-10-03": [
+        {"show_id": "SH-101", "title": "Neon Harbor", "english_subtitles": true, "standard_seats_available": 5},
+        {"show_id": "SH-102", "title": "The Salt Marsh", "english_subtitles": false, "standard_seats_available": 9},
+        {"show_id": "SH-103", "title": "Paper Lanterns", "english_subtitles": true, "standard_seats_available": 2},
+        {"show_id": "SH-104", "title": "Winter Aviary", "english_subtitles": true, "standard_seats_available": 4}
+      ]
+    },
+    "seat_prices": {
+      "SH-101|standard": 62,
+      "SH-101|premium": 88,
+      "SH-102|standard": 35,
+      "SH-102|premium": 55,
+      "SH-103|standard": 29,
+      "SH-103|premium": 44,
+      "SH-104|standard": 48,
+      "SH-104|premium": 70
+    },
+    "seats_available": {
+      "SH-101|standard": 5,
+      "SH-101|premium": 6,
+      "SH-102|standard": 9,
+      "SH-102|premium": 3,
+      "SH-103|standard": 2,
+      "SH-103|premium": 8,
+      "SH-104|standard": 4,
+      "SH-104|premium": 5
+    },
+    "purchase_refs": {"SH-101": "TX-5510", "SH-102": "TX-5520", "SH-103": "TX-5530", "SH-104": "TX-5540"}
+  },
+  "initial_state": {},
+  "tools": [
+    {
+      "name": "list_shows",
+      "description": "List shows playing in a city on a date, with subtitle availability and remaining standard seats.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "city": {"type": "string", "description": "city name, e.g. 'Rivermoor'"},
+          "date": {"type": "string", "description": "YYYY-MM-DD"}
+        },
+        "required": ["city", "date"]
+      },
+      "behavior": {
+        "result": "data['shows'][args['city'] + '|' + args['date']]"
+      }
+    },
+    {
+      "name": "get_seat_price",
+      "description": "Get the per-seat price and remaining availability for one show and one seat tier.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "show_id": {"type": "string", "description": "show_id from list_shows"},
+          "tier": {"type": "string", "enum": ["standard", "premium"], "description": "seat tier"}
+        },
+        "required": ["show_id", "tier"]
+      },
+      "behavior": {
+        "result": "{'show_id': args['show_id'], 'tier': args['tier'], 'price_per_seat_usd': data['seat_prices'][args['show_id'] + '|' + args['tier']], 'seats_available': data['seats_available'][args['show_id'] + '|' + args['tier']]}"
+      }
+    },
+    {
+      "name": "purchase_tickets",
+      "description": "Purchase seats for a show. quantity must not exceed the remaining availability for that tier. Returns the purchase reference and amount charged.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "show_id": {"type": "string"},
+          "tier": {"type": "string", "enum": ["standard", "premium"]},
+          "quantity": {"type": "integer"},
+          "buyer_name": {"type": "string"}
+        },
+        "required": ["show_id", "tier", "quantity", "buyer_name"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "args['show_id'] in data['purchase_refs']", "error": "Unknown show_id."},
+          {"cond": "args['quantity'] >= 1", "error": "quantity must be at least 1."},
+          {"cond": "args['quantity'] <= data['seats_available'][args['show_id'] + '|' + args['tier']]", "error": "Not enough seats available in that tier."}
+        ],
+        "effect": {
+          "purchased_show": "args['show_id']",
+          "purchased_tier": "args['tier']",
+          "purchased_qty": "args['quantity']",
+          "purchase_ref": "data['purchase_refs'][args['show_id']]",
+          "amount_charged": "data['seat_prices'][args['show_id'] + '|' + args['tier']] * args['quantity']"
+        },
+        "result": "{'purchase_ref': data['purchase_refs'][args['show_id']], 'amount_charged_usd': data['seat_prices'][args['show_id'] + '|' + args['tier']] * args['quantity'], 'quantity': args['quantity']}"
+      }
+    },
+    {
+      "name": "set_ticket_delivery",
+      "description": "Choose how the purchased tickets are delivered. Requires an existing purchase reference.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "purchase_ref": {"type": "string"},
+          "method": {"type": "string", "enum": ["e_ticket", "box_office", "postal"]}
+        },
+        "required": ["purchase_ref", "method"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "get(state, 'purchase_ref', '') == args['purchase_ref']", "error": "No such purchase reference."}
+        ],
+        "effect": {"delivery_method": "args['method']"},
+        "result": "{'purchase_ref': args['purchase_ref'], 'delivery_method': args['method']}"
+      }
+    },
+    {
+      "name": "get_venue_directions",
+      "description": "Get transit directions to a venue.",
+      "parameters": {
+        "type": "object",
+        "properties": {"show_id": {"type": "string"}},
+        "required": ["show_id"]
+      },
+      "distractor": true,
+      "distractor_reply": "Metro line 2 to Rivermoor Central, 6 min walk. (Directions are not part of this task.)"
+    },
+    {
+      "name": "list_merchandise",
+      "description": "List merchandise sold at the venue shop.",
+      "parameters": {
+        "type": "object",
+        "properties": {"category": {"type": "string", "enum": ["poster", "apparel", "program"]}},
+        "required": ["category"]
+      },
+      "distractor": true,
+      "distractor_reply": "4 items in stock. (Merchandise is unrelated to this purchase.)"
+    }
+  ],
+  "error_injection": {
+    "tool": "purchase_tickets",
+    "nth_call": 1,
+    "message": "Seat lock expired during checkout (transient). No card was charged; please retry."
+  },
+  "oracle": [
+    {"action": "list_shows", "args": {"city": "Rivermoor", "date": "2026-10-03"}},
+    {"action": "get_seat_price", "args": {"show_id": "SH-101", "tier": "standard"}},
+    {"action": "get_seat_price", "args": {"show_id": "SH-104", "tier": "standard"}},
+    {"action": "purchase_tickets", "args": {"show_id": "SH-104", "tier": "standard", "quantity": 3, "buyer_name": "Dana Ruiz"}},
+    {"action": "set_ticket_delivery", "args": {"purchase_ref": "TX-5540", "method": "e_ticket"}}
+  ],
+  "goal": {
+    "conditions": [
+      "get(state, 'purchased_show', '') == 'SH-104'",
+      "get(state, 'purchased_tier', '') == 'standard'",
+      "get(state, 'purchased_qty', 0) == 3",
+      "get(state, 'amount_charged', 0) == 144",
+      "get(state, 'delivery_method', '') == 'e_ticket'"
+    ],
+    "answer_contains": ["'TX-5540'", "144"]
+  }
+}

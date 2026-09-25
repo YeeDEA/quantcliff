@@ -1,0 +1,146 @@
+{
+  "id": "s20_smart_home_thermostat",
+  "domain": "smart-home",
+  "task": "In the smart-home hub, list the devices in the living_room, read the current temperature from that room's temperature sensor, then set the living_room thermostat's target to exactly 2.5 degrees Celsius ABOVE that sensor reading (the thermostat's own current setpoint is irrelevant). Finally read the thermostat state back to verify the new target was applied. Report the acknowledgement code and the target temperature you set.",
+  "max_steps": 9,
+  "data": {
+    "devices": {
+      "living_room": [
+        {"device_id": "SEN-TEMP-LR", "type": "temperature_sensor", "room": "living_room"},
+        {"device_id": "TH-LR-1", "type": "thermostat", "room": "living_room"},
+        {"device_id": "LGT-LR-3", "type": "light", "room": "living_room"}
+      ],
+      "hallway": [
+        {"device_id": "SEN-TEMP-HW", "type": "temperature_sensor", "room": "hallway"}
+      ]
+    },
+    "sensors": {
+      "SEN-TEMP-LR": {"device_id": "SEN-TEMP-LR", "unit": "C", "value_c": 21.5},
+      "SEN-TEMP-HW": {"device_id": "SEN-TEMP-HW", "unit": "C", "value_c": 24.0}
+    },
+    "thermostats": {
+      "TH-LR-1": {"device_id": "TH-LR-1", "room": "living_room", "current_setpoint_c": 20.0, "mode": "heat", "sensor_id": "SEN-TEMP-LR"}
+    }
+  },
+  "initial_state": {},
+  "tools": [
+    {
+      "name": "list_devices",
+      "description": "List every device registered in a room, with its device_id and type.",
+      "parameters": {
+        "type": "object",
+        "properties": {"room": {"type": "string", "description": "e.g. 'living_room'"}},
+        "required": ["room"]
+      },
+      "behavior": {"result": "data['devices'][args['room']]"}
+    },
+    {
+      "name": "read_sensor",
+      "description": "Read the current value of a temperature sensor, in Celsius.",
+      "parameters": {
+        "type": "object",
+        "properties": {"device_id": {"type": "string", "description": "device_id of a temperature_sensor from list_devices"}},
+        "required": ["device_id"]
+      },
+      "behavior": {"result": "data['sensors'][args['device_id']]"}
+    },
+    {
+      "name": "set_thermostat_target",
+      "description": "Set a thermostat's target temperature in Celsius. The hub rejects any target that is not the intended value for the current request.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "device_id": {"type": "string", "description": "thermostat device_id"},
+          "target_c": {"type": "number", "description": "target temperature in Celsius"}
+        },
+        "required": ["device_id", "target_c"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "args['device_id'] in data['thermostats']", "error": "Unknown thermostat device_id."},
+          {"cond": "args['target_c'] >= 5.0", "error": "Target below the hub's minimum of 5.0 C."},
+          {"cond": "args['target_c'] <= 32.0", "error": "Target above the hub's maximum of 32.0 C."},
+          {"cond": "args['target_c'] == data['sensors'][data['thermostats'][args['device_id']]['sensor_id']]['value_c'] + 2.5", "error": "Rejected: the target does not match the requested offset from this room's current sensor reading."}
+        ],
+        "effect": {
+          "thermostat_target": "args['target_c']",
+          "thermostat_device": "args['device_id']",
+          "ack_code": "'TH-ACK-4417'"
+        },
+        "result": "{'ack': 'TH-ACK-4417', 'device_id': args['device_id'], 'target_c': args['target_c']}"
+      }
+    },
+    {
+      "name": "get_thermostat_state",
+      "description": "Read a thermostat's live state, including the target temperature currently applied.",
+      "parameters": {
+        "type": "object",
+        "properties": {"device_id": {"type": "string"}},
+        "required": ["device_id"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "args['device_id'] in data['thermostats']", "error": "Unknown thermostat device_id."},
+          {"cond": "get(state, 'thermostat_device', '') == args['device_id']", "error": "This thermostat has no pending or applied target from this session."}
+        ],
+        "effect": {"target_verified": "True"},
+        "result": "{'device_id': args['device_id'], 'target_c': state['thermostat_target'], 'mode': data['thermostats'][args['device_id']]['mode'], 'ack': state['ack_code']}"
+      }
+    },
+    {
+      "name": "set_light_brightness",
+      "description": "Set the brightness percentage of a light.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "device_id": {"type": "string"},
+          "brightness_pct": {"type": "integer"}
+        },
+        "required": ["device_id", "brightness_pct"]
+      },
+      "distractor": true,
+      "distractor_reply": "Brightness updated. (Lighting is not part of this task.)"
+    },
+    {
+      "name": "get_energy_report",
+      "description": "Get the home's energy consumption report for a period.",
+      "parameters": {
+        "type": "object",
+        "properties": {"period": {"type": "string", "enum": ["day", "week", "month"]}},
+        "required": ["period"]
+      },
+      "distractor": true,
+      "distractor_reply": "412 kWh used. (Energy reporting has no effect on the thermostat.)"
+    },
+    {
+      "name": "run_scene",
+      "description": "Run a saved smart-home scene by name.",
+      "parameters": {
+        "type": "object",
+        "properties": {"scene_name": {"type": "string"}},
+        "required": ["scene_name"]
+      },
+      "distractor": true,
+      "distractor_reply": "Scene executed. (Scenes do not set a specific thermostat target.)"
+    }
+  ],
+  "error_injection": {
+    "tool": "set_thermostat_target",
+    "nth_call": 1,
+    "message": "Hub radio busy: the thermostat did not acknowledge in time. Please retry the same command."
+  },
+  "oracle": [
+    {"action": "list_devices", "args": {"room": "living_room"}},
+    {"action": "read_sensor", "args": {"device_id": "SEN-TEMP-LR"}},
+    {"action": "set_thermostat_target", "args": {"device_id": "TH-LR-1", "target_c": 24.0}},
+    {"action": "get_thermostat_state", "args": {"device_id": "TH-LR-1"}}
+  ],
+  "goal": {
+    "conditions": [
+      "get(state, 'thermostat_device', '') == 'TH-LR-1'",
+      "get(state, 'thermostat_target', 0) == 24.0",
+      "get(state, 'target_verified', False) == True"
+    ],
+    "answer_contains": ["'TH-ACK-4417'", "24.0"]
+  }
+}

@@ -1,0 +1,143 @@
+{
+  "id": "s07_inventory_restock",
+  "domain": "warehouse-operations",
+  "task": "The Riverside warehouse has several SKUs below their reorder point. Restock ONLY the one with the LOWEST on-hand quantity: order exactly enough units from that SKU's preferred supplier to bring on-hand up to its target level (no more, no less), using RUSH priority, then confirm the purchase order. Report the purchase order id.",
+  "max_steps": 9,
+  "data": {
+    "low_stock": {
+      "riverside": [
+        {"sku": "SKU-441", "name": "Hex bolt M8", "on_hand": 12, "target_level": 60},
+        {"sku": "SKU-980", "name": "Nitrile glove L", "on_hand": 4, "target_level": 50},
+        {"sku": "SKU-113", "name": "Shipping tape 48mm", "on_hand": 18, "target_level": 40}
+      ]
+    },
+    "items": {
+      "SKU-441": {"sku": "SKU-441", "on_hand": 12, "target_level": 60, "supplier_id": "SUP-2", "unit_cost_usd": 0.35},
+      "SKU-980": {"sku": "SKU-980", "on_hand": 4, "target_level": 50, "supplier_id": "SUP-7", "unit_cost_usd": 0.22},
+      "SKU-113": {"sku": "SKU-113", "on_hand": 18, "target_level": 40, "supplier_id": "SUP-2", "unit_cost_usd": 1.1}
+    },
+    "purchase_orders": {"SKU-980": "PO-4412", "SKU-441": "PO-4413", "SKU-113": "PO-4414"}
+  },
+  "initial_state": {},
+  "tools": [
+    {
+      "name": "list_low_stock",
+      "description": "List every SKU in a warehouse that is currently below its reorder point, with on-hand and target level.",
+      "parameters": {
+        "type": "object",
+        "properties": {"warehouse": {"type": "string", "description": "warehouse slug, e.g. 'riverside'"}},
+        "required": ["warehouse"]
+      },
+      "behavior": {"result": "data['low_stock'][args['warehouse']]"}
+    },
+    {
+      "name": "get_item",
+      "description": "Fetch an inventory item by SKU, including its preferred supplier_id, on-hand count, target level and unit cost.",
+      "parameters": {
+        "type": "object",
+        "properties": {"sku": {"type": "string"}},
+        "required": ["sku"]
+      },
+      "behavior": {
+        "effect": {"inspected_sku": "args['sku']"},
+        "result": "data['items'][args['sku']]"
+      }
+    },
+    {
+      "name": "create_purchase_order",
+      "description": "Create a draft purchase order for one SKU. units must exactly close the gap between on_hand and target_level. supplier_id must be the item's preferred supplier. Returns the draft purchase order id and its total cost.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "sku": {"type": "string"},
+          "units": {"type": "integer", "description": "number of units to order"},
+          "supplier_id": {"type": "string", "description": "supplier_id from get_item"},
+          "priority": {"type": "string", "enum": ["standard", "rush"]}
+        },
+        "required": ["sku", "units", "supplier_id", "priority"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "args['sku'] in data['items']", "error": "Unknown SKU."},
+          {"cond": "get(state, 'inspected_sku', '') == args['sku']", "error": "Inspect the item with get_item before ordering it."},
+          {"cond": "args['supplier_id'] == data['items'][args['sku']]['supplier_id']", "error": "supplier_id is not the preferred supplier for this SKU."},
+          {"cond": "args['units'] == data['items'][args['sku']]['target_level'] - data['items'][args['sku']]['on_hand']", "error": "units must exactly bring on_hand up to target_level."}
+        ],
+        "effect": {
+          "po_id": "data['purchase_orders'][args['sku']]",
+          "po_sku": "args['sku']",
+          "po_units": "args['units']",
+          "po_priority": "args['priority']",
+          "po_confirmed": "False"
+        },
+        "result": "{'po_id': data['purchase_orders'][args['sku']], 'sku': args['sku'], 'units': args['units'], 'priority': args['priority'], 'total_cost_usd': round(data['items'][args['sku']]['unit_cost_usd'] * args['units'], 2)}"
+      }
+    },
+    {
+      "name": "confirm_purchase_order",
+      "description": "Send a draft purchase order to the supplier. expected_units must match the units on the draft.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "po_id": {"type": "string", "description": "po_id from create_purchase_order"},
+          "expected_units": {"type": "integer"}
+        },
+        "required": ["po_id", "expected_units"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "get(state, 'po_id', '') == args['po_id']", "error": "No such draft purchase order."},
+          {"cond": "args['expected_units'] == get(state, 'po_units', 0)", "error": "expected_units does not match the draft purchase order."}
+        ],
+        "effect": {"po_confirmed": "True"},
+        "result": "{'po_id': args['po_id'], 'status': 'sent_to_supplier', 'units': args['expected_units']}"
+      }
+    },
+    {
+      "name": "print_shelf_labels",
+      "description": "Queue printing of shelf labels for a warehouse aisle.",
+      "parameters": {
+        "type": "object",
+        "properties": {"aisle": {"type": "string"}},
+        "required": ["aisle"]
+      },
+      "distractor": true,
+      "distractor_reply": "24 labels queued for printing. (Label printing is unrelated to restocking.)"
+    },
+    {
+      "name": "schedule_stock_count",
+      "description": "Schedule a physical stock count for a warehouse.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "warehouse": {"type": "string"},
+          "date": {"type": "string", "description": "YYYY-MM-DD"}
+        },
+        "required": ["warehouse", "date"]
+      },
+      "distractor": true,
+      "distractor_reply": "Stock count scheduled. (Does not change inventory or create orders.)"
+    }
+  ],
+  "error_injection": {
+    "tool": "create_purchase_order",
+    "nth_call": 1,
+    "message": "Supplier catalog service is momentarily unreachable (connection reset). Please retry creating the purchase order."
+  },
+  "oracle": [
+    {"action": "list_low_stock", "args": {"warehouse": "riverside"}},
+    {"action": "get_item", "args": {"sku": "SKU-980"}},
+    {"action": "create_purchase_order", "args": {"sku": "SKU-980", "units": 46, "supplier_id": "SUP-7", "priority": "rush"}},
+    {"action": "confirm_purchase_order", "args": {"po_id": "PO-4412", "expected_units": 46}}
+  ],
+  "goal": {
+    "conditions": [
+      "get(state, 'po_sku', '') == 'SKU-980'",
+      "get(state, 'po_units', 0) == 46",
+      "get(state, 'po_priority', '') == 'rush'",
+      "get(state, 'po_id', '') == 'PO-4412'",
+      "get(state, 'po_confirmed', False) == True"
+    ],
+    "answer_contains": ["'PO-4412'", "46"]
+  }
+}

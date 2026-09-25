@@ -1,0 +1,12 @@
+# local runtime & weights — reproducible via harness/setup instructions
+tools/
+models/
+__pycache__/
+*.pyc
+.venv/
+# scratch
+*.tmp
+server.log
+RESUME.md
+QUANTCLIFF_PANEL_RAW.json
+results/raw/*_smoke.jsonl

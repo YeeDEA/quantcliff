@@ -1,0 +1,151 @@
+{
+  "id": "s18_clinic_appointment",
+  "domain": "healthcare-scheduling",
+  "task": "At Northvale Family Clinic, book an appointment for patient Mira Hollis (member id MH-4820) with the DERMATOLOGY doctor who is currently accepting new patients. Choose that doctor's EARLIEST available slot on 2026-09-03, then re-read the appointment record to confirm it was written. Report the appointment confirmation code and the slot start time. This is scheduling only - do not give any medical advice.",
+  "max_steps": 9,
+  "data": {
+    "doctors_by_specialty": {
+      "dermatology": [
+        {"doctor_id": "DR-118", "name": "Dr. Alvin Reyes", "specialty": "dermatology", "accepting_new_patients": false},
+        {"doctor_id": "DR-204", "name": "Dr. Petra Lindqvist", "specialty": "dermatology", "accepting_new_patients": true},
+        {"doctor_id": "DR-377", "name": "Dr. Omar Bassey", "specialty": "dermatology", "accepting_new_patients": false}
+      ],
+      "cardiology": [
+        {"doctor_id": "DR-501", "name": "Dr. Nadia Kwon", "specialty": "cardiology", "accepting_new_patients": true}
+      ]
+    },
+    "slots": {
+      "DR-204|2026-09-03": [
+        {"slot_id": "S-9042", "start": "15:20"},
+        {"slot_id": "S-9017", "start": "09:40"},
+        {"slot_id": "S-9033", "start": "11:05"}
+      ],
+      "DR-118|2026-09-03": [
+        {"slot_id": "S-8801", "start": "08:15"}
+      ],
+      "DR-377|2026-09-03": [
+        {"slot_id": "S-8850", "start": "08:50"}
+      ]
+    },
+    "accepting": {"DR-118": false, "DR-204": true, "DR-377": false},
+    "slot_start": {"S-9042": "15:20", "S-9017": "09:40", "S-9033": "11:05", "S-8801": "08:15", "S-8850": "08:50"},
+    "slot_owner": {"S-9042": "DR-204", "S-9017": "DR-204", "S-9033": "DR-204", "S-8801": "DR-118", "S-8850": "DR-377"}
+  },
+  "initial_state": {},
+  "tools": [
+    {
+      "name": "find_doctors",
+      "description": "List clinic doctors for a given specialty, including whether each one is accepting new patients.",
+      "parameters": {
+        "type": "object",
+        "properties": {"specialty": {"type": "string", "description": "e.g. 'dermatology'"}},
+        "required": ["specialty"]
+      },
+      "behavior": {"result": "data['doctors_by_specialty'][args['specialty']]"}
+    },
+    {
+      "name": "list_open_slots",
+      "description": "List a doctor's open appointment slots for one calendar date. Slots are returned in no particular order.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "doctor_id": {"type": "string", "description": "doctor_id from find_doctors"},
+          "date": {"type": "string", "description": "YYYY-MM-DD"}
+        },
+        "required": ["doctor_id", "date"]
+      },
+      "behavior": {"result": "data['slots'][args['doctor_id'] + '|' + args['date']]"}
+    },
+    {
+      "name": "book_appointment",
+      "description": "Book a slot for a patient. The slot must belong to the given doctor, and the doctor must be accepting new patients. Returns a confirmation code.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "doctor_id": {"type": "string"},
+          "slot_id": {"type": "string", "description": "slot_id from list_open_slots"},
+          "patient_name": {"type": "string"},
+          "member_id": {"type": "string"}
+        },
+        "required": ["doctor_id", "slot_id", "patient_name", "member_id"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "args['member_id'] == 'MH-4820'", "error": "Member id not found in the clinic registry."},
+          {"cond": "get(data['accepting'], args['doctor_id'], False) == True", "error": "This doctor is not accepting new patients."},
+          {"cond": "data['slot_owner'][args['slot_id']] == args['doctor_id']", "error": "That slot does not belong to this doctor."}
+        ],
+        "effect": {
+          "appointment_slot": "args['slot_id']",
+          "appointment_doctor": "args['doctor_id']",
+          "appointment_code": "'APT-6R41'"
+        },
+        "result": "{'confirmation_code': 'APT-6R41', 'slot_id': args['slot_id'], 'start': data['slot_start'][args['slot_id']]}"
+      }
+    },
+    {
+      "name": "get_appointment",
+      "description": "Read back a booked appointment by its confirmation code.",
+      "parameters": {
+        "type": "object",
+        "properties": {"confirmation_code": {"type": "string"}},
+        "required": ["confirmation_code"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "get(state, 'appointment_code', '') == args['confirmation_code']", "error": "No appointment exists with that confirmation code."}
+        ],
+        "effect": {"appointment_verified": "True"},
+        "result": "{'confirmation_code': args['confirmation_code'], 'doctor_id': state['appointment_doctor'], 'slot_id': state['appointment_slot'], 'start': data['slot_start'][state['appointment_slot']], 'patient': 'Mira Hollis'}"
+      }
+    },
+    {
+      "name": "get_parking_info",
+      "description": "Get parking and transit directions for a clinic building.",
+      "parameters": {
+        "type": "object",
+        "properties": {"building": {"type": "string"}},
+        "required": ["building"]
+      },
+      "distractor": true,
+      "distractor_reply": "Underground lot B, 2 hours validated. (Not relevant to scheduling.)"
+    },
+    {
+      "name": "check_insurance_network",
+      "description": "Check whether an insurance plan is in-network at the clinic.",
+      "parameters": {
+        "type": "object",
+        "properties": {"plan_code": {"type": "string"}},
+        "required": ["plan_code"]
+      },
+      "distractor": true,
+      "distractor_reply": "Plan is in-network. (No insurance step is required for this booking.)"
+    },
+    {
+      "name": "list_clinic_specialties",
+      "description": "List every specialty offered by the clinic.",
+      "parameters": {"type": "object", "properties": {}, "required": []},
+      "distractor": true,
+      "distractor_reply": "dermatology, cardiology, pediatrics, orthopedics."
+    }
+  ],
+  "error_injection": {
+    "tool": "book_appointment",
+    "nth_call": 1,
+    "message": "Scheduling service is momentarily locked by a calendar sync (HTTP 409). Please retry the booking."
+  },
+  "oracle": [
+    {"action": "find_doctors", "args": {"specialty": "dermatology"}},
+    {"action": "list_open_slots", "args": {"doctor_id": "DR-204", "date": "2026-09-03"}},
+    {"action": "book_appointment", "args": {"doctor_id": "DR-204", "slot_id": "S-9017", "patient_name": "Mira Hollis", "member_id": "MH-4820"}},
+    {"action": "get_appointment", "args": {"confirmation_code": "APT-6R41"}}
+  ],
+  "goal": {
+    "conditions": [
+      "get(state, 'appointment_doctor', '') == 'DR-204'",
+      "get(state, 'appointment_slot', '') == 'S-9017'",
+      "get(state, 'appointment_verified', False) == True"
+    ],
+    "answer_contains": ["'APT-6R41'", "'09:40'"]
+  }
+}

@@ -1,0 +1,181 @@
+{
+  "id": "s12_devops_incident",
+  "domain": "devops",
+  "task": "Pager alert AL-4471 just fired. Read the alert to find which cluster it belongs to, list that cluster's service health, and fix the ONE service whose status is 'unhealthy'. Our runbook requires draining a service from the load balancer before restarting it, and a health check may only be run after the restart. Report the restart id and the service's post-restart status.",
+  "max_steps": 10,
+  "data": {
+    "alerts": {
+      "AL-4471": {
+        "alert_id": "AL-4471",
+        "cluster": "orion-prod",
+        "severity": "P1",
+        "summary": "Elevated 5xx rate behind the edge gateway; one backend service is not serving traffic."
+      }
+    },
+    "cluster_health": {
+      "orion-prod": [
+        {"service": "edge-gateway", "status": "healthy", "error_rate_pct": 0.2},
+        {"service": "payments-api", "status": "unhealthy", "error_rate_pct": 61.4},
+        {"service": "ledger-worker", "status": "degraded", "error_rate_pct": 3.1},
+        {"service": "notify-fanout", "status": "healthy", "error_rate_pct": 0.0}
+      ]
+    },
+    "service_index": {
+      "orion-prod|edge-gateway": {"replicas": 6},
+      "orion-prod|payments-api": {"replicas": 4},
+      "orion-prod|ledger-worker": {"replicas": 2},
+      "orion-prod|notify-fanout": {"replicas": 3}
+    },
+    "restart_ids": {
+      "orion-prod|payments-api": "RS-8812",
+      "orion-prod|ledger-worker": "RS-8813",
+      "orion-prod|edge-gateway": "RS-8814",
+      "orion-prod|notify-fanout": "RS-8815"
+    }
+  },
+  "initial_state": {},
+  "tools": [
+    {
+      "name": "get_alert",
+      "description": "Read a pager alert by its alert id. Returns the affected cluster and a summary.",
+      "parameters": {
+        "type": "object",
+        "properties": {"alert_id": {"type": "string", "description": "e.g. 'AL-4471'"}},
+        "required": ["alert_id"]
+      },
+      "behavior": {"result": "data['alerts'][args['alert_id']]"}
+    },
+    {
+      "name": "list_service_health",
+      "description": "List every service in a cluster with its current status ('healthy', 'degraded' or 'unhealthy') and error rate.",
+      "parameters": {
+        "type": "object",
+        "properties": {"cluster": {"type": "string", "description": "cluster name from the alert"}},
+        "required": ["cluster"]
+      },
+      "behavior": {"result": "data['cluster_health'][args['cluster']]"}
+    },
+    {
+      "name": "drain_service",
+      "description": "Drain a service out of the load balancer. Required by the runbook before any restart.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "cluster": {"type": "string"},
+          "service": {"type": "string"}
+        },
+        "required": ["cluster", "service"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "args['cluster'] + '|' + args['service'] in data['service_index']", "error": "No such service in that cluster."}
+        ],
+        "effect": {"drained_service": "args['service']", "drained_cluster": "args['cluster']"},
+        "result": "{'drained': args['service'], 'connections_remaining': 0}"
+      }
+    },
+    {
+      "name": "restart_service",
+      "description": "Restart a service. Fails unless that exact service has already been drained from the load balancer.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "cluster": {"type": "string"},
+          "service": {"type": "string"}
+        },
+        "required": ["cluster", "service"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "args['cluster'] + '|' + args['service'] in data['restart_ids']", "error": "No such service in that cluster."},
+          {"cond": "get(state, 'drained_service', '') == args['service']", "error": "Runbook violation: this service is still receiving traffic. Drain it from the load balancer first."}
+        ],
+        "effect": {
+          "restarted_service": "args['service']",
+          "restart_id": "data['restart_ids'][args['cluster'] + '|' + args['service']]"
+        },
+        "result": "{'restart_id': data['restart_ids'][args['cluster'] + '|' + args['service']], 'state': 'restarting'}"
+      }
+    },
+    {
+      "name": "check_health",
+      "description": "Run a health probe against a service. Only valid after that service has been restarted.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "cluster": {"type": "string"},
+          "service": {"type": "string"}
+        },
+        "required": ["cluster", "service"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "get(state, 'restarted_service', '') == args['service']", "error": "Health probe rejected: the service has not been restarted in this incident yet."}
+        ],
+        "effect": {"health_verified": "True", "final_status": "'healthy'"},
+        "result": "{'service': args['service'], 'status': 'healthy', 'error_rate_pct': 0.1}"
+      }
+    },
+    {
+      "name": "scale_service",
+      "description": "Change the replica count of a service.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "cluster": {"type": "string"},
+          "service": {"type": "string"},
+          "replicas": {"type": "integer"}
+        },
+        "required": ["cluster", "service", "replicas"]
+      },
+      "distractor": true,
+      "distractor_reply": "Replica count updated. (Scaling does not resolve this incident.)"
+    },
+    {
+      "name": "search_logs",
+      "description": "Full-text search the cluster log archive.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "cluster": {"type": "string"},
+          "query": {"type": "string"}
+        },
+        "required": ["cluster", "query"]
+      },
+      "distractor": true,
+      "distractor_reply": "2,481 matching log lines (truncated). Nothing actionable here."
+    },
+    {
+      "name": "post_status_page",
+      "description": "Publish a message to the public status page.",
+      "parameters": {
+        "type": "object",
+        "properties": {"message": {"type": "string"}},
+        "required": ["message"]
+      },
+      "distractor": true,
+      "distractor_reply": "Status page updated. (Not part of this task.)"
+    }
+  ],
+  "error_injection": {
+    "tool": "restart_service",
+    "nth_call": 1,
+    "message": "Orchestrator lease contention: restart request timed out. This is transient, please retry."
+  },
+  "oracle": [
+    {"action": "get_alert", "args": {"alert_id": "AL-4471"}},
+    {"action": "list_service_health", "args": {"cluster": "orion-prod"}},
+    {"action": "drain_service", "args": {"cluster": "orion-prod", "service": "payments-api"}},
+    {"action": "restart_service", "args": {"cluster": "orion-prod", "service": "payments-api"}},
+    {"action": "check_health", "args": {"cluster": "orion-prod", "service": "payments-api"}}
+  ],
+  "goal": {
+    "conditions": [
+      "get(state, 'drained_service', '') == 'payments-api'",
+      "get(state, 'restarted_service', '') == 'payments-api'",
+      "get(state, 'restart_id', '') == 'RS-8812'",
+      "get(state, 'health_verified', False) == True"
+    ],
+    "answer_contains": ["'RS-8812'", "'healthy'"]
+  }
+}

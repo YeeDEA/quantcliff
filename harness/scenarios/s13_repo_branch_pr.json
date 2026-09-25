@@ -1,0 +1,172 @@
+{
+  "id": "s13_repo_branch_pr",
+  "domain": "code-repo",
+  "task": "Ship the fix for issue ENG-207 in repository aurora-web. Read the issue to learn the repository's default branch, the file to change and the exact replacement content. Then create the branch 'fix/eng-207' off the default branch, commit that file on the new branch with a commit message that mentions ENG-207, and open a pull request from 'fix/eng-207' into the default branch with a title that also mentions ENG-207. Report the pull request number.",
+  "max_steps": 9,
+  "data": {
+    "issues": {
+      "ENG-207": {
+        "issue_id": "ENG-207",
+        "repo": "aurora-web",
+        "title": "Checkout request timeout is too aggressive",
+        "default_branch": "main",
+        "file_path": "src/config/timeout.js",
+        "required_content": "export const REQUEST_TIMEOUT_MS = 30000;"
+      }
+    },
+    "repos": {
+      "aurora-web": {"default_branch": "main", "branches": ["main", "release-4.2"]}
+    },
+    "commit_ids": {
+      "aurora-web|fix/eng-207": "c9f13ab"
+    },
+    "pull_requests": {
+      "aurora-web|fix/eng-207|main": {"pr_number": "PR-142", "url": "https://git.example-internal.test/aurora-web/pull/142"}
+    }
+  },
+  "initial_state": {},
+  "tools": [
+    {
+      "name": "get_issue",
+      "description": "Read a tracker issue by id. Returns the repository, its default branch, the file to change and the exact required file content.",
+      "parameters": {
+        "type": "object",
+        "properties": {"issue_id": {"type": "string", "description": "e.g. 'ENG-207'"}},
+        "required": ["issue_id"]
+      },
+      "behavior": {"result": "data['issues'][args['issue_id']]"}
+    },
+    {
+      "name": "create_branch",
+      "description": "Create a new branch in a repository from an existing base branch.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "repo": {"type": "string"},
+          "branch": {"type": "string", "description": "name of the new branch"},
+          "base": {"type": "string", "description": "existing branch to branch off"}
+        },
+        "required": ["repo", "branch", "base"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "args['repo'] in data['repos']", "error": "Unknown repository."},
+          {"cond": "args['base'] in data['repos'][args['repo']]['branches']", "error": "Base branch does not exist in this repository."},
+          {"cond": "args['branch'] + '' not in data['repos'][args['repo']]['branches']", "error": "A branch with that name already exists."}
+        ],
+        "effect": {"branch": "args['branch']", "repo": "args['repo']", "base": "args['base']"},
+        "result": "{'branch': args['branch'], 'created_from': args['base']}"
+      }
+    },
+    {
+      "name": "commit_file",
+      "description": "Write a file and commit it on an existing branch. The branch must already exist in this session.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "repo": {"type": "string"},
+          "branch": {"type": "string"},
+          "path": {"type": "string"},
+          "content": {"type": "string"},
+          "message": {"type": "string", "description": "commit message"}
+        },
+        "required": ["repo", "branch", "path", "content", "message"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "get(state, 'branch', '') == args['branch']", "error": "Branch not found: create the branch before committing to it."},
+          {"cond": "args['path'] == data['issues']['ENG-207']['file_path']", "error": "That path is not the file named in the issue."},
+          {"cond": "args['content'] == data['issues']['ENG-207']['required_content']", "error": "File content does not match the replacement content specified in the issue."},
+          {"cond": "'ENG-207' in args['message']", "error": "Commit message must reference the issue key (ENG-207)."}
+        ],
+        "effect": {
+          "committed_on": "args['branch']",
+          "commit_sha": "data['commit_ids'][args['repo'] + '|' + args['branch']]"
+        },
+        "result": "{'commit_sha': data['commit_ids'][args['repo'] + '|' + args['branch']], 'path': args['path']}"
+      }
+    },
+    {
+      "name": "open_pull_request",
+      "description": "Open a pull request from a head branch into a base branch. The head branch must contain at least one commit made in this session.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "repo": {"type": "string"},
+          "head": {"type": "string"},
+          "base": {"type": "string"},
+          "title": {"type": "string"}
+        },
+        "required": ["repo", "head", "base", "title"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "get(state, 'committed_on', '') == args['head']", "error": "Cannot open a pull request: the head branch has no commits ahead of the base."},
+          {"cond": "'ENG-207' in args['title']", "error": "Pull request title must reference the issue key (ENG-207)."},
+          {"cond": "args['repo'] + '|' + args['head'] + '|' + args['base'] in data['pull_requests']", "error": "No pull request route between those branches."}
+        ],
+        "effect": {
+          "pr_number": "data['pull_requests'][args['repo'] + '|' + args['head'] + '|' + args['base']]['pr_number']",
+          "pr_opened": "True"
+        },
+        "result": "data['pull_requests'][args['repo'] + '|' + args['head'] + '|' + args['base']]"
+      }
+    },
+    {
+      "name": "list_workflow_runs",
+      "description": "List recent CI workflow runs for a repository.",
+      "parameters": {
+        "type": "object",
+        "properties": {"repo": {"type": "string"}},
+        "required": ["repo"]
+      },
+      "distractor": true,
+      "distractor_reply": "Last 5 runs: 4 passed, 1 cancelled. (CI history is not part of this task.)"
+    },
+    {
+      "name": "add_issue_comment",
+      "description": "Post a comment on a tracker issue.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "issue_id": {"type": "string"},
+          "body": {"type": "string"}
+        },
+        "required": ["issue_id", "body"]
+      },
+      "distractor": true,
+      "distractor_reply": "Comment posted. (Commenting does not advance this task.)"
+    },
+    {
+      "name": "fork_repo",
+      "description": "Fork a repository into your personal namespace.",
+      "parameters": {
+        "type": "object",
+        "properties": {"repo": {"type": "string"}},
+        "required": ["repo"]
+      },
+      "distractor": true,
+      "distractor_reply": "Fork created. (You already have write access; a fork is not needed.)"
+    }
+  ],
+  "error_injection": {
+    "tool": "commit_file",
+    "nth_call": 1,
+    "message": "Git server returned 'remote end hung up unexpectedly' while writing the pack. Transient — please retry the commit."
+  },
+  "oracle": [
+    {"action": "get_issue", "args": {"issue_id": "ENG-207"}},
+    {"action": "create_branch", "args": {"repo": "aurora-web", "branch": "fix/eng-207", "base": "main"}},
+    {"action": "commit_file", "args": {"repo": "aurora-web", "branch": "fix/eng-207", "path": "src/config/timeout.js", "content": "export const REQUEST_TIMEOUT_MS = 30000;", "message": "ENG-207: raise checkout request timeout to 30s"}},
+    {"action": "open_pull_request", "args": {"repo": "aurora-web", "head": "fix/eng-207", "base": "main", "title": "ENG-207: raise checkout request timeout"}}
+  ],
+  "goal": {
+    "conditions": [
+      "get(state, 'branch', '') == 'fix/eng-207'",
+      "get(state, 'commit_sha', '') == 'c9f13ab'",
+      "get(state, 'pr_opened', False) == True",
+      "get(state, 'pr_number', '') == 'PR-142'"
+    ],
+    "answer_contains": ["'PR-142'"]
+  }
+}

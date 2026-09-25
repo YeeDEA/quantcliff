@@ -1,0 +1,9 @@
+[start] llama-3.1-8b Q8_0
+  t1 constrained=False: 495s
+  t2 constrained=False rep=0: 1604s
+  t2 constrained=False rep=1: 1483s
+  t1 constrained=True: 504s
+  t2 constrained=True rep=0: 1117s
+  t2 constrained=True rep=1: 1012s
+[done] llama-3.1-8b Q8_0 -> llama-3.1-8b_Q8_0_ctx4096.jsonl (peak VRAM 7827 MiB)
+SWEEP COMPLETE

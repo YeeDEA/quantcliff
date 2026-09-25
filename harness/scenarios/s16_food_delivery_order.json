@@ -1,0 +1,150 @@
+{
+  "id": "s16_food_delivery_order",
+  "domain": "food-delivery",
+  "task": "Order lunch delivery from the KOREAN restaurant listed in the Maple Heights area. Look up its menu, then place a single order of exactly 3 items: one main, one side and one drink. The order total must not exceed 24.00 USD, and among all combinations that fit that budget you must pick the one with the HIGHEST total. Then confirm delivery to 88 Larkin Way, Apt 5C with the leave_at_door contact option. Report the order id and the order total.",
+  "max_steps": 9,
+  "data": {
+    "restaurants": {
+      "korean|Maple Heights": [
+        {"restaurant_id": "RST-208", "name": "Green Bowl Kitchen", "cuisine": "korean", "eta_minutes": 32}
+      ],
+      "mexican|Maple Heights": [
+        {"restaurant_id": "RST-411", "name": "Casa Pinon", "cuisine": "mexican", "eta_minutes": 25}
+      ]
+    },
+    "menus": {
+      "RST-208": [
+        {"item_id": "M-1", "name": "Bibim Rice Bowl", "category": "main", "price_usd": 14.5},
+        {"item_id": "M-2", "name": "Tofu Stew Bowl", "category": "main", "price_usd": 12.0},
+        {"item_id": "S-1", "name": "House Kimchi", "category": "side", "price_usd": 4.5},
+        {"item_id": "S-2", "name": "Sesame Fries", "category": "side", "price_usd": 5.0},
+        {"item_id": "D-1", "name": "Barley Tea", "category": "drink", "price_usd": 3.0},
+        {"item_id": "D-2", "name": "Yuzu Lemonade", "category": "drink", "price_usd": 4.0}
+      ]
+    },
+    "prices": {"M-1": 14.5, "M-2": 12.0, "S-1": 4.5, "S-2": 5.0, "D-1": 3.0, "D-2": 4.0},
+    "category": {"M-1": "main", "M-2": "main", "S-1": "side", "S-2": "side", "D-1": "drink", "D-2": "drink"},
+    "budget_usd": 24.0
+  },
+  "initial_state": {},
+  "tools": [
+    {
+      "name": "find_restaurant",
+      "description": "List delivery restaurants in an area filtered by cuisine. Returns restaurant records including restaurant_id.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "area": {"type": "string", "description": "delivery area name, e.g. 'Maple Heights'"},
+          "cuisine": {"type": "string", "enum": ["korean", "mexican", "indian"], "description": "cuisine category"}
+        },
+        "required": ["area", "cuisine"]
+      },
+      "behavior": {
+        "result": "data['restaurants'][args['cuisine'] + '|' + args['area']]"
+      }
+    },
+    {
+      "name": "get_menu",
+      "description": "Fetch the full menu of a restaurant. Each item has an item_id, category (main/side/drink) and price in USD.",
+      "parameters": {
+        "type": "object",
+        "properties": {"restaurant_id": {"type": "string", "description": "restaurant_id from find_restaurant"}},
+        "required": ["restaurant_id"]
+      },
+      "behavior": {
+        "result": "data['menus'][args['restaurant_id']]"
+      }
+    },
+    {
+      "name": "place_order",
+      "description": "Place an order of exactly 3 items (one main, one side, one drink). total_usd must equal the exact sum of the item prices and must not exceed the 24.00 USD budget. Returns the order id.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "restaurant_id": {"type": "string"},
+          "item_ids": {"type": "array", "items": {"type": "string"}, "description": "exactly 3 item_ids"},
+          "total_usd": {"type": "number", "description": "sum of the three item prices"}
+        },
+        "required": ["restaurant_id", "item_ids", "total_usd"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "args['restaurant_id'] in data['menus']", "error": "Unknown restaurant_id."},
+          {"cond": "len(args['item_ids']) == 3", "error": "An order must contain exactly 3 items."},
+          {"cond": "sorted([data['category'][args['item_ids'][0]], data['category'][args['item_ids'][1]], data['category'][args['item_ids'][2]]]) == ['drink', 'main', 'side']", "error": "The order must contain exactly one main, one side and one drink."},
+          {"cond": "args['total_usd'] == data['prices'][args['item_ids'][0]] + data['prices'][args['item_ids'][1]] + data['prices'][args['item_ids'][2]]", "error": "total_usd does not equal the sum of the item prices."},
+          {"cond": "args['total_usd'] <= data['budget_usd']", "error": "Order total exceeds the 24.00 USD budget."}
+        ],
+        "effect": {
+          "order_id": "'OD-7731'",
+          "order_total": "args['total_usd']",
+          "order_item_count": "len(args['item_ids'])"
+        },
+        "result": "{'order_id': 'OD-7731', 'total_usd': args['total_usd'], 'status': 'placed'}"
+      }
+    },
+    {
+      "name": "confirm_delivery",
+      "description": "Confirm the delivery address and contact option for an existing order.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "order_id": {"type": "string"},
+          "address": {"type": "string"},
+          "contact_option": {"type": "string", "enum": ["hand_to_me", "leave_at_door", "meet_outside"]}
+        },
+        "required": ["order_id", "address", "contact_option"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "get(state, 'order_id', '') == args['order_id']", "error": "No such order."},
+          {"cond": "args['address'] == '88 Larkin Way, Apt 5C'", "error": "Address is not in the delivery zone."}
+        ],
+        "effect": {"delivery_confirmed": "True", "contact_option": "args['contact_option']"},
+        "result": "{'confirmed': True, 'eta_minutes': 32}"
+      }
+    },
+    {
+      "name": "list_coupons",
+      "description": "List coupon codes currently available to the account.",
+      "parameters": {"type": "object", "properties": {}, "required": []},
+      "distractor": true,
+      "distractor_reply": "No coupons available. (Coupons do not apply to this order.)"
+    },
+    {
+      "name": "rate_courier",
+      "description": "Submit a star rating for the courier of a past delivery.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "courier_id": {"type": "string"},
+          "stars": {"type": "integer"}
+        },
+        "required": ["courier_id", "stars"]
+      },
+      "distractor": true,
+      "distractor_reply": "Rating recorded. (Rating a past courier is unrelated to this task.)"
+    }
+  ],
+  "error_injection": {
+    "tool": "place_order",
+    "nth_call": 1,
+    "message": "Restaurant terminal did not acknowledge in time (504). Nothing was charged; please retry."
+  },
+  "oracle": [
+    {"action": "find_restaurant", "args": {"area": "Maple Heights", "cuisine": "korean"}},
+    {"action": "get_menu", "args": {"restaurant_id": "RST-208"}},
+    {"action": "place_order", "args": {"restaurant_id": "RST-208", "item_ids": ["M-1", "S-2", "D-2"], "total_usd": 23.5}},
+    {"action": "confirm_delivery", "args": {"order_id": "OD-7731", "address": "88 Larkin Way, Apt 5C", "contact_option": "leave_at_door"}}
+  ],
+  "goal": {
+    "conditions": [
+      "get(state, 'order_id', '') == 'OD-7731'",
+      "get(state, 'order_total', 0) == 23.5",
+      "get(state, 'order_item_count', 0) == 3",
+      "get(state, 'delivery_confirmed', False) == True",
+      "get(state, 'contact_option', '') == 'leave_at_door'"
+    ],
+    "answer_contains": ["'OD-7731'", "'23.5'"]
+  }
+}

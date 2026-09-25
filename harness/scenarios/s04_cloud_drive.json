@@ -1,0 +1,163 @@
+{
+  "id": "s04_cloud_drive",
+  "domain": "file-management",
+  "task": "On the team cloud drive, find the LARGEST PDF file in the folder /Projects. Create a new subfolder named '2026' inside the existing /Archive folder, move that PDF into it, then share the moved file as a view-only link (role 'viewer', scope 'link') and fetch the link. Report the share link id and the file name.",
+  "max_steps": 10,
+  "data": {
+    "folders": {
+      "/Projects": [
+        {"file_id": "F-11", "name": "roadmap.pdf", "size_kb": 2400},
+        {"file_id": "F-12", "name": "budget_2026.xlsx", "size_kb": 9100},
+        {"file_id": "F-13", "name": "whitepaper.pdf", "size_kb": 5300},
+        {"file_id": "F-14", "name": "meeting_notes.txt", "size_kb": 6100},
+        {"file_id": "F-15", "name": "onepager.pdf", "size_kb": 880}
+      ],
+      "/Archive": []
+    },
+    "file_index": {
+      "F-11": {"file_id": "F-11", "name": "roadmap.pdf", "size_kb": 2400},
+      "F-12": {"file_id": "F-12", "name": "budget_2026.xlsx", "size_kb": 9100},
+      "F-13": {"file_id": "F-13", "name": "whitepaper.pdf", "size_kb": 5300},
+      "F-14": {"file_id": "F-14", "name": "meeting_notes.txt", "size_kb": 6100},
+      "F-15": {"file_id": "F-15", "name": "onepager.pdf", "size_kb": 880}
+    },
+    "new_folder_ids": {"/Archive|2026": "D-77"}
+  },
+  "initial_state": {},
+  "tools": [
+    {
+      "name": "list_folder",
+      "description": "List the files in a folder, with each file's id, name and size in KB.",
+      "parameters": {
+        "type": "object",
+        "properties": {"path": {"type": "string", "description": "absolute folder path, e.g. '/Projects'"}},
+        "required": ["path"]
+      },
+      "behavior": {"result": "data['folders'][args['path']]"}
+    },
+    {
+      "name": "create_folder",
+      "description": "Create a subfolder inside an existing parent folder. Returns the new folder id.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "parent_path": {"type": "string", "description": "absolute path of an existing parent folder"},
+          "name": {"type": "string", "description": "name of the new subfolder"}
+        },
+        "required": ["parent_path", "name"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "args['parent_path'] in data['folders']", "error": "Parent folder does not exist."}
+        ],
+        "effect": {
+          "new_folder_id": "data['new_folder_ids'][args['parent_path'] + '|' + args['name']]"
+        },
+        "result": "{'folder_id': data['new_folder_ids'][args['parent_path'] + '|' + args['name']], 'path': args['parent_path'] + '/' + args['name']}"
+      }
+    },
+    {
+      "name": "move_file",
+      "description": "Move a file into a destination folder. The destination folder must already exist (create it first if needed).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_id": {"type": "string", "description": "file_id from list_folder"},
+          "dest_folder_id": {"type": "string", "description": "folder id returned by create_folder"}
+        },
+        "required": ["file_id", "dest_folder_id"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "args['file_id'] in data['file_index']", "error": "Unknown file_id."},
+          {"cond": "get(state, 'new_folder_id', '') == args['dest_folder_id']", "error": "Destination folder does not exist yet."}
+        ],
+        "effect": {
+          "moved_file": "args['file_id']",
+          "moved_to": "args['dest_folder_id']"
+        },
+        "result": "{'file_id': args['file_id'], 'name': data['file_index'][args['file_id']]['name'], 'moved_to': args['dest_folder_id']}"
+      }
+    },
+    {
+      "name": "set_permission",
+      "description": "Set the sharing permission of a file that has already been moved to its final location.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_id": {"type": "string"},
+          "role": {"type": "string", "enum": ["viewer", "commenter", "editor"]},
+          "scope": {"type": "string", "enum": ["private", "domain", "link"]}
+        },
+        "required": ["file_id", "role", "scope"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "get(state, 'moved_file', '') == args['file_id']", "error": "Set permissions only after the file has been moved to its final folder."}
+        ],
+        "effect": {
+          "permission_role": "args['role']",
+          "permission_scope": "args['scope']"
+        },
+        "result": "{'file_id': args['file_id'], 'role': args['role'], 'scope': args['scope']}"
+      }
+    },
+    {
+      "name": "get_share_link",
+      "description": "Fetch the shareable link id of a file. Only works once the file is shared by link.",
+      "parameters": {
+        "type": "object",
+        "properties": {"file_id": {"type": "string"}},
+        "required": ["file_id"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "get(state, 'permission_scope', '') == 'link'", "error": "This file is not shared by link yet."},
+          {"cond": "get(state, 'moved_file', '') == args['file_id']", "error": "Unknown or unshared file."}
+        ],
+        "effect": {"share_id": "'SL-4192'"},
+        "result": "{'share_id': 'SL-4192', 'url': 'https://drive.example.com/s/SL-4192', 'role': state['permission_role']}"
+      }
+    },
+    {
+      "name": "search_photos",
+      "description": "Search the drive's photo library by keyword.",
+      "parameters": {
+        "type": "object",
+        "properties": {"query": {"type": "string"}},
+        "required": ["query"]
+      },
+      "distractor": true,
+      "distractor_reply": "3 photos matched. (Photos are unrelated to this task.)"
+    },
+    {
+      "name": "check_storage_quota",
+      "description": "Report the drive's used and total storage.",
+      "parameters": {"type": "object", "properties": {}, "required": []},
+      "distractor": true,
+      "distractor_reply": "41.2 GB of 200 GB used."
+    }
+  ],
+  "error_injection": {
+    "tool": "move_file",
+    "nth_call": 1,
+    "message": "Drive sync lock held by another client (409). Please retry the move."
+  },
+  "oracle": [
+    {"action": "list_folder", "args": {"path": "/Projects"}},
+    {"action": "create_folder", "args": {"parent_path": "/Archive", "name": "2026"}},
+    {"action": "move_file", "args": {"file_id": "F-13", "dest_folder_id": "D-77"}},
+    {"action": "set_permission", "args": {"file_id": "F-13", "role": "viewer", "scope": "link"}},
+    {"action": "get_share_link", "args": {"file_id": "F-13"}}
+  ],
+  "goal": {
+    "conditions": [
+      "get(state, 'moved_file', '') == 'F-13'",
+      "get(state, 'moved_to', '') == 'D-77'",
+      "get(state, 'permission_role', '') == 'viewer'",
+      "get(state, 'permission_scope', '') == 'link'",
+      "get(state, 'share_id', '') == 'SL-4192'"
+    ],
+    "answer_contains": ["'SL-4192'", "'whitepaper.pdf'"]
+  }
+}

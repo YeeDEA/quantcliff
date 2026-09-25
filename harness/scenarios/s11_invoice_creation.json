@@ -1,0 +1,161 @@
+{
+  "id": "s11_invoice_creation",
+  "domain": "billing",
+  "task": "In the Halcyon Studio billing sandbox, raise the August 2026 invoice for the client whose company name is 'Northwind Atlas Ltd'. Look the client up by name to get its client id, then read its contract terms for the contracted hourly rate and the billable hours already logged for August 2026, and read the tax rate that applies to the client's tax region. Compute the invoice as follows, in this order: subtotal = billable hours x contracted hourly rate, rounded to 2 decimals; tax = subtotal x tax rate, rounded to 2 decimals; total = subtotal + tax, rounded to 2 decimals. Create the draft invoice with those three exact figures, then issue the draft so it becomes a final numbered invoice. Report the final invoice number and the total amount due.",
+  "max_steps": 10,
+  "data": {
+    "clients_by_name": {
+      "Northwind Atlas Ltd": {"client_id": "CL-8802", "company_name": "Northwind Atlas Ltd", "tax_region": "EU-IE", "billing_email": "ap@northwind-atlas.example"},
+      "Kettleridge Foods Ltd": {"client_id": "CL-8803", "company_name": "Kettleridge Foods Ltd", "tax_region": "EU-DE", "billing_email": "ap@kettleridge.example"}
+    },
+    "contracts": {
+      "CL-8802": {"client_id": "CL-8802", "hourly_rate_usd": 145.0, "billable_hours_2026_08": 37.5, "payment_terms": "net 30"},
+      "CL-8803": {"client_id": "CL-8803", "hourly_rate_usd": 120.0, "billable_hours_2026_08": 20.0, "payment_terms": "net 15"}
+    },
+    "tax_rates": {
+      "EU-IE": {"tax_region": "EU-IE", "rate": 0.0825, "label": "service tax 8.25%"},
+      "EU-DE": {"tax_region": "EU-DE", "rate": 0.19, "label": "service tax 19%"}
+    },
+    "expected": {
+      "CL-8802": {"subtotal_usd": 5437.5, "tax_usd": 448.59, "total_usd": 5886.09, "draft_id": "DRAFT-3391", "invoice_number": "INV-2026-0814"}
+    },
+    "issued": {"DRAFT-3391": {"invoice_number": "INV-2026-0814", "total_usd": 5886.09, "status": "issued"}}
+  },
+  "initial_state": {},
+  "tools": [
+    {
+      "name": "find_client",
+      "description": "Look up a client by exact company name. Returns client_id and tax_region.",
+      "parameters": {
+        "type": "object",
+        "properties": {"company_name": {"type": "string", "description": "exact company name"}},
+        "required": ["company_name"]
+      },
+      "behavior": {"result": "data['clients_by_name'][args['company_name']]"}
+    },
+    {
+      "name": "get_contract_terms",
+      "description": "Return a client's contract terms: contracted hourly rate and the billable hours logged for August 2026.",
+      "parameters": {
+        "type": "object",
+        "properties": {"client_id": {"type": "string", "description": "client_id from find_client"}},
+        "required": ["client_id"]
+      },
+      "behavior": {"result": "data['contracts'][args['client_id']]"}
+    },
+    {
+      "name": "get_tax_rate",
+      "description": "Return the tax rate that applies to a tax region.",
+      "parameters": {
+        "type": "object",
+        "properties": {"tax_region": {"type": "string", "description": "tax_region from find_client, e.g. 'EU-IE'"}},
+        "required": ["tax_region"]
+      },
+      "behavior": {"result": "data['tax_rates'][args['tax_region']]"}
+    },
+    {
+      "name": "create_invoice_draft",
+      "description": "Create a draft invoice for a client. subtotal_usd, tax_usd and total_usd must each be exact to 2 decimals and internally consistent with the contract and the region's tax rate. Returns a draft_id.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "client_id": {"type": "string"},
+          "period": {"type": "string", "description": "billing period, e.g. '2026-08'"},
+          "subtotal_usd": {"type": "number"},
+          "tax_usd": {"type": "number"},
+          "total_usd": {"type": "number"}
+        },
+        "required": ["client_id", "period", "subtotal_usd", "tax_usd", "total_usd"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "args['client_id'] in data['contracts']", "error": "Unknown client id."},
+          {"cond": "args['period'] == '2026-08'", "error": "Only the 2026-08 billing period is open."},
+          {"cond": "round(args['subtotal_usd'], 2) == data['expected'][args['client_id']]['subtotal_usd']", "error": "Rejected: subtotal_usd does not equal billable hours multiplied by the contracted hourly rate."},
+          {"cond": "round(args['tax_usd'], 2) == data['expected'][args['client_id']]['tax_usd']", "error": "Rejected: tax_usd does not equal the subtotal multiplied by the region's tax rate, rounded to 2 decimals."},
+          {"cond": "round(args['total_usd'], 2) == data['expected'][args['client_id']]['total_usd']", "error": "Rejected: total_usd does not equal subtotal plus tax, rounded to 2 decimals."}
+        ],
+        "effect": {
+          "draft_id": "data['expected'][args['client_id']]['draft_id']",
+          "draft_total": "round(args['total_usd'], 2)"
+        },
+        "result": "{'draft_id': data['expected'][args['client_id']]['draft_id'], 'subtotal_usd': round(args['subtotal_usd'], 2), 'tax_usd': round(args['tax_usd'], 2), 'total_usd': round(args['total_usd'], 2), 'status': 'draft'}"
+      }
+    },
+    {
+      "name": "issue_invoice",
+      "description": "Issue a draft invoice so it becomes final and numbered. Requires the draft_id from create_invoice_draft. Returns the final invoice number.",
+      "parameters": {
+        "type": "object",
+        "properties": {"draft_id": {"type": "string", "description": "draft_id from create_invoice_draft"}},
+        "required": ["draft_id"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "get(state, 'draft_id', '') == args['draft_id']", "error": "No such draft: create the invoice draft first."}
+        ],
+        "effect": {
+          "invoice_number": "data['issued'][args['draft_id']]['invoice_number']",
+          "invoice_issued": "True"
+        },
+        "result": "data['issued'][args['draft_id']]"
+      }
+    },
+    {
+      "name": "list_open_invoices",
+      "description": "List invoices that are still unpaid across all clients.",
+      "parameters": {"type": "object", "properties": {}, "required": []},
+      "distractor": true,
+      "distractor_reply": "3 open invoices totalling 9,140.00 USD. (Existing unpaid invoices do not affect the new one.)"
+    },
+    {
+      "name": "send_payment_reminder",
+      "description": "Email a payment reminder for an existing invoice.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "invoice_number": {"type": "string"},
+          "to": {"type": "string"}
+        },
+        "required": ["invoice_number", "to"]
+      },
+      "distractor": true,
+      "distractor_reply": "Reminder queued. (No reminder was requested for this task.)"
+    },
+    {
+      "name": "get_currency_conversion",
+      "description": "Convert an amount between currencies at today's rate.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "amount": {"type": "number"},
+          "base": {"type": "string"},
+          "quote": {"type": "string"}
+        },
+        "required": ["amount", "base", "quote"]
+      },
+      "distractor": true,
+      "distractor_reply": "Conversion returned. (This invoice is billed in USD only.)"
+    }
+  ],
+  "error_injection": {
+    "tool": "create_invoice_draft",
+    "nth_call": 1,
+    "message": "Billing ledger write conflict (409); no draft was created. Please retry with the same figures."
+  },
+  "oracle": [
+    {"action": "find_client", "args": {"company_name": "Northwind Atlas Ltd"}},
+    {"action": "get_contract_terms", "args": {"client_id": "CL-8802"}},
+    {"action": "get_tax_rate", "args": {"tax_region": "EU-IE"}},
+    {"action": "create_invoice_draft", "args": {"client_id": "CL-8802", "period": "2026-08", "subtotal_usd": 5437.5, "tax_usd": 448.59, "total_usd": 5886.09}},
+    {"action": "issue_invoice", "args": {"draft_id": "DRAFT-3391"}}
+  ],
+  "goal": {
+    "conditions": [
+      "get(state, 'invoice_issued', False) == True",
+      "get(state, 'draft_total', 0) == 5886.09",
+      "get(state, 'invoice_number', '') == 'INV-2026-0814'"
+    ],
+    "answer_contains": ["'INV-2026-0814'", "'5886.09'"]
+  }
+}

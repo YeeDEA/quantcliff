@@ -1,0 +1,153 @@
+{
+  "id": "s10_expense_report",
+  "domain": "finance-operations",
+  "task": "Submit draft expense report ER-2044 (employee Marta Okonjo, policy set POL-STD) in the Brightline Internal Expenses sandbox. Pull the draft's line items and the per-category daily limits from policy POL-STD, then submit ONLY the items whose amount is within its category limit. An item is out of policy only if its amount is STRICTLY GREATER than its category limit; an item exactly at the limit stays in. Do not modify or split amounts - simply omit the out-of-policy items. The submission requires the exact list of retained item ids and their exact summed total, rounded to 2 decimals. After submitting, request manager approval and report the approval id along with the submitted total.",
+  "max_steps": 9,
+  "data": {
+    "report_items": {
+      "ER-2044": [
+        {"item_id": "E-1", "category": "meals", "amount_usd": 62.4, "note": "team dinner"},
+        {"item_id": "E-2", "category": "meals", "amount_usd": 98.0, "note": "client dinner"},
+        {"item_id": "E-3", "category": "lodging", "amount_usd": 210.0, "note": "hotel night 1"},
+        {"item_id": "E-4", "category": "transport", "amount_usd": 44.15, "note": "airport taxi"},
+        {"item_id": "E-5", "category": "transport", "amount_usd": 150.0, "note": "rental car day rate"},
+        {"item_id": "E-6", "category": "supplies", "amount_usd": 31.99, "note": "conference notebook"}
+      ]
+    },
+    "policies": {
+      "POL-STD": {
+        "policy_id": "POL-STD",
+        "daily_limits_usd": {"meals": 75.0, "lodging": 200.0, "transport": 150.0, "supplies": 50.0},
+        "note": "An item is out of policy only if its amount is strictly greater than its category limit."
+      }
+    },
+    "expected": {
+      "ER-2044": {
+        "item_ids": ["E-1", "E-4", "E-5", "E-6"],
+        "total_usd": 288.54,
+        "submission_id": "SUB-61180"
+      }
+    },
+    "approvals": {"SUB-61180": {"approval_id": "APV-77310", "approver": "Reza Lindqvist"}}
+  },
+  "initial_state": {},
+  "tools": [
+    {
+      "name": "get_report_items",
+      "description": "List every draft line item on an expense report: item_id, category and amount_usd.",
+      "parameters": {
+        "type": "object",
+        "properties": {"report_id": {"type": "string", "description": "e.g. 'ER-2044'"}},
+        "required": ["report_id"]
+      },
+      "behavior": {"result": "data['report_items'][args['report_id']]"}
+    },
+    {
+      "name": "get_policy_limits",
+      "description": "Return the per-category daily spend limits for a policy set id.",
+      "parameters": {
+        "type": "object",
+        "properties": {"policy_id": {"type": "string", "description": "e.g. 'POL-STD'"}},
+        "required": ["policy_id"]
+      },
+      "behavior": {"result": "data['policies'][args['policy_id']]"}
+    },
+    {
+      "name": "submit_report",
+      "description": "Submit an expense report with the item ids to include and their summed total. item_ids must be exactly the set of in-policy items (order does not matter) and total_usd must equal their exact sum rounded to 2 decimals. Returns a submission_id.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "report_id": {"type": "string"},
+          "item_ids": {"type": "array", "items": {"type": "string"}, "description": "item ids to include"},
+          "total_usd": {"type": "number", "description": "exact sum of the included items, rounded to 2 decimals"}
+        },
+        "required": ["report_id", "item_ids", "total_usd"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "args['report_id'] in data['report_items']", "error": "Unknown report id."},
+          {"cond": "sorted(args['item_ids']) == data['expected'][args['report_id']]['item_ids']", "error": "Rejected: the submitted item set does not match the in-policy items for this report."},
+          {"cond": "round(args['total_usd'], 2) == data['expected'][args['report_id']]['total_usd']", "error": "Rejected: total_usd does not equal the exact sum of the submitted items."}
+        ],
+        "effect": {
+          "submitted_report": "args['report_id']",
+          "submission_id": "data['expected'][args['report_id']]['submission_id']",
+          "submitted_total": "round(args['total_usd'], 2)"
+        },
+        "result": "{'submission_id': data['expected'][args['report_id']]['submission_id'], 'total_usd': round(args['total_usd'], 2), 'item_count': len(args['item_ids']), 'status': 'submitted'}"
+      }
+    },
+    {
+      "name": "request_approval",
+      "description": "Route a submitted report to the employee's manager for approval. Requires the submission_id returned by submit_report. Returns the approval id.",
+      "parameters": {
+        "type": "object",
+        "properties": {"submission_id": {"type": "string", "description": "submission_id from submit_report"}},
+        "required": ["submission_id"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "get(state, 'submission_id', '') == args['submission_id']", "error": "No such submission: submit the report first."}
+        ],
+        "effect": {
+          "approval_id": "data['approvals'][args['submission_id']]['approval_id']",
+          "approval_requested": "True"
+        },
+        "result": "data['approvals'][args['submission_id']]"
+      }
+    },
+    {
+      "name": "get_mileage_rate",
+      "description": "Return the current per-kilometer mileage reimbursement rate.",
+      "parameters": {"type": "object", "properties": {}, "required": []},
+      "distractor": true,
+      "distractor_reply": "0.58 USD per km. (No mileage items are on this report.)"
+    },
+    {
+      "name": "upload_receipt",
+      "description": "Attach a scanned receipt image to a line item.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "item_id": {"type": "string"},
+          "file_name": {"type": "string"}
+        },
+        "required": ["item_id", "file_name"]
+      },
+      "distractor": true,
+      "distractor_reply": "Receipt attached. (All receipts on ER-2044 are already on file; this has no effect on submission.)"
+    },
+    {
+      "name": "get_reimbursement_history",
+      "description": "List an employee's past reimbursement payouts.",
+      "parameters": {
+        "type": "object",
+        "properties": {"employee_name": {"type": "string"}},
+        "required": ["employee_name"]
+      },
+      "distractor": true,
+      "distractor_reply": "4 past payouts found. (Historical payouts do not affect this submission.)"
+    }
+  ],
+  "error_injection": {
+    "tool": "submit_report",
+    "nth_call": 1,
+    "message": "Expense workflow service returned 504 Gateway Timeout; the draft was not submitted. Please retry the submission unchanged."
+  },
+  "oracle": [
+    {"action": "get_report_items", "args": {"report_id": "ER-2044"}},
+    {"action": "get_policy_limits", "args": {"policy_id": "POL-STD"}},
+    {"action": "submit_report", "args": {"report_id": "ER-2044", "item_ids": ["E-1", "E-4", "E-5", "E-6"], "total_usd": 288.54}},
+    {"action": "request_approval", "args": {"submission_id": "SUB-61180"}}
+  ],
+  "goal": {
+    "conditions": [
+      "get(state, 'submitted_report', '') == 'ER-2044'",
+      "get(state, 'submitted_total', 0) == 288.54",
+      "get(state, 'approval_requested', False) == True",
+      "get(state, 'approval_id', '') == 'APV-77310'"
+    ],
+    "answer_contains": ["'APV-77310'", "'288.54'"]
+  }
+}

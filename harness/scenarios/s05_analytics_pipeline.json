@@ -1,0 +1,157 @@
+{
+  "id": "s05_analytics_pipeline",
+  "domain": "data-analysis",
+  "task": "Using the analytics warehouse, locate the dataset named 'q2_sales_2026'. Fetch only its EMEA rows, run the row-integrity validation for that dataset, then store a report with metric 'mean' whose value is the mean revenue_usd of the EMEA rows rounded to 2 decimals, and whose row_count is the number of EMEA rows. Report the report id and the mean value you stored.",
+  "max_steps": 10,
+  "data": {
+    "datasets": {
+      "q2_sales_2026": {"dataset_id": "DS-9", "name": "q2_sales_2026", "rows_total": 7}
+    },
+    "rows": {
+      "DS-9|EMEA": [
+        {"row_id": 1, "region": "EMEA", "revenue_usd": 38200},
+        {"row_id": 2, "region": "EMEA", "revenue_usd": 41100},
+        {"row_id": 3, "region": "EMEA", "revenue_usd": 45500},
+        {"row_id": 4, "region": "EMEA", "revenue_usd": 40201}
+      ],
+      "DS-9|APAC": [
+        {"row_id": 5, "region": "APAC", "revenue_usd": 12000},
+        {"row_id": 6, "region": "APAC", "revenue_usd": 90500}
+      ],
+      "DS-9|AMER": [
+        {"row_id": 7, "region": "AMER", "revenue_usd": 61000}
+      ]
+    },
+    "expected": {
+      "DS-9|EMEA|mean": 41250.25,
+      "DS-9|EMEA|sum": 165001,
+      "DS-9|EMEA|count": 4
+    },
+    "validation": {
+      "DS-9": {"dataset_id": "DS-9", "integrity": "pass", "null_columns": 0}
+    }
+  },
+  "initial_state": {},
+  "tools": [
+    {
+      "name": "find_dataset",
+      "description": "Look up a warehouse dataset by its name. Returns the dataset_id needed by the other tools.",
+      "parameters": {
+        "type": "object",
+        "properties": {"name": {"type": "string", "description": "dataset name, e.g. 'q2_sales_2026'"}},
+        "required": ["name"]
+      },
+      "behavior": {"result": "data['datasets'][args['name']]"}
+    },
+    {
+      "name": "fetch_rows",
+      "description": "Fetch the rows of a dataset for one region. Each row includes revenue_usd.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "dataset_id": {"type": "string", "description": "dataset_id from find_dataset"},
+          "region": {"type": "string", "enum": ["EMEA", "APAC", "AMER"]}
+        },
+        "required": ["dataset_id", "region"]
+      },
+      "behavior": {
+        "effect": {"fetched_region": "args['region']", "fetched_count": "len(data['rows'][args['dataset_id'] + '|' + args['region']])"},
+        "result": "data['rows'][args['dataset_id'] + '|' + args['region']]"
+      }
+    },
+    {
+      "name": "validate_rows",
+      "description": "Run the row-integrity validation for a dataset. Rows must have been fetched first, and row_count must equal the number of rows you actually fetched.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "dataset_id": {"type": "string"},
+          "row_count": {"type": "integer", "description": "number of rows returned by fetch_rows"}
+        },
+        "required": ["dataset_id", "row_count"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "get(state, 'fetched_count', 0) > 0", "error": "No rows have been fetched yet."},
+          {"cond": "args['row_count'] == state['fetched_count']", "error": "row_count does not match the number of rows fetched."}
+        ],
+        "effect": {"validated": "True"},
+        "result": "data['validation'][args['dataset_id']]"
+      }
+    },
+    {
+      "name": "store_report",
+      "description": "Store an aggregate report. The dataset must have passed validation, and value must exactly match the requested aggregate of the fetched rows (rounded to 2 decimals).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "dataset_id": {"type": "string"},
+          "region": {"type": "string", "enum": ["EMEA", "APAC", "AMER"]},
+          "metric": {"type": "string", "enum": ["sum", "mean", "max"]},
+          "value": {"type": "number"},
+          "row_count": {"type": "integer"}
+        },
+        "required": ["dataset_id", "region", "metric", "value", "row_count"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "get(state, 'validated', False) == True", "error": "Dataset has not passed validation yet."},
+          {"cond": "args['row_count'] == data['expected'][args['dataset_id'] + '|' + args['region'] + '|count']", "error": "row_count does not match the number of rows in that region."},
+          {"cond": "args['value'] == data['expected'][args['dataset_id'] + '|' + args['region'] + '|' + args['metric']]", "error": "Stored value does not match the aggregate computed from the rows."}
+        ],
+        "effect": {
+          "report_stored": "True",
+          "report_metric": "args['metric']",
+          "report_value": "args['value']",
+          "report_id": "'RPT-7731'"
+        },
+        "result": "{'report_id': 'RPT-7731', 'metric': args['metric'], 'value': args['value'], 'row_count': args['row_count']}"
+      }
+    },
+    {
+      "name": "retrain_forecast_model",
+      "description": "Trigger a retrain of the revenue forecasting model.",
+      "parameters": {
+        "type": "object",
+        "properties": {"model": {"type": "string"}},
+        "required": ["model"]
+      },
+      "distractor": true,
+      "distractor_reply": "Retrain job queued. (Model training is not part of this task.)"
+    },
+    {
+      "name": "export_dashboard",
+      "description": "Export a BI dashboard as a PNG image.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "dashboard_id": {"type": "string"},
+          "format": {"type": "string", "enum": ["png", "pdf"]}
+        },
+        "required": ["dashboard_id", "format"]
+      },
+      "distractor": true,
+      "distractor_reply": "Export ready. (Dashboards are unrelated to this task.)"
+    }
+  ],
+  "error_injection": {
+    "tool": "fetch_rows",
+    "nth_call": 1,
+    "message": "Warehouse query timed out after 30s. Please retry the fetch."
+  },
+  "oracle": [
+    {"action": "find_dataset", "args": {"name": "q2_sales_2026"}},
+    {"action": "fetch_rows", "args": {"dataset_id": "DS-9", "region": "EMEA"}},
+    {"action": "validate_rows", "args": {"dataset_id": "DS-9", "row_count": 4}},
+    {"action": "store_report", "args": {"dataset_id": "DS-9", "region": "EMEA", "metric": "mean", "value": 41250.25, "row_count": 4}}
+  ],
+  "goal": {
+    "conditions": [
+      "get(state, 'validated', False) == True",
+      "get(state, 'report_stored', False) == True",
+      "get(state, 'report_metric', '') == 'mean'",
+      "get(state, 'report_value', 0) == 41250.25"
+    ],
+    "answer_contains": ["'RPT-7731'", "41250.25"]
+  }
+}

@@ -1,0 +1,158 @@
+{
+  "id": "s09_bank_transfer",
+  "domain": "banking",
+  "task": "Using the Pelham Mutual online banking sandbox for customer Dana Whitlock (customer id CU-5518), move as much money as possible out of her CHECKING account into her SAVINGS account in a single internal transfer, subject to these rules: (1) the checking account must be left holding exactly the bank's minimum retained balance, and (2) the flat internal transfer fee is debited from the checking account on top of the transfer amount, so it must be covered by the same available balance. Look up the minimum retained balance and the fee in the fee schedule rather than assuming them. The destination savings account must be verified as a payee before the transfer, and the transfer amount must be sent as an exact number rounded to 2 decimals. Report the transfer confirmation id and the exact amount transferred.",
+  "max_steps": 10,
+  "data": {
+    "accounts_by_customer": {
+      "CU-5518": [
+        {"account_id": "PM-CHK-7741", "type": "CHECKING", "currency": "USD"},
+        {"account_id": "PM-SAV-2260", "type": "SAVINGS", "currency": "USD"},
+        {"account_id": "PM-CRD-9013", "type": "CREDIT_CARD", "currency": "USD"}
+      ]
+    },
+    "balances": {
+      "PM-CHK-7741": {"account_id": "PM-CHK-7741", "balance_usd": 4318.75, "available_usd": 4318.75},
+      "PM-SAV-2260": {"account_id": "PM-SAV-2260", "balance_usd": 1200.0, "available_usd": 1200.0}
+    },
+    "fee_schedule": {
+      "internal_transfer_fee_usd": 12.5,
+      "minimum_retained_balance_usd": 250.0,
+      "external_wire_fee_usd": 28.0
+    },
+    "payee_tokens": {
+      "PM-SAV-2260": "PYT-2260-OK",
+      "PM-CRD-9013": "PYT-9013-OK"
+    }
+  },
+  "initial_state": {},
+  "tools": [
+    {
+      "name": "list_accounts",
+      "description": "List all accounts belonging to a customer id, with account_id and account type.",
+      "parameters": {
+        "type": "object",
+        "properties": {"customer_id": {"type": "string", "description": "e.g. 'CU-5518'"}},
+        "required": ["customer_id"]
+      },
+      "behavior": {"result": "data['accounts_by_customer'][args['customer_id']]"}
+    },
+    {
+      "name": "get_balance",
+      "description": "Get the current and available balance of one account by account_id.",
+      "parameters": {
+        "type": "object",
+        "properties": {"account_id": {"type": "string", "description": "account_id from list_accounts"}},
+        "required": ["account_id"]
+      },
+      "behavior": {"result": "data['balances'][args['account_id']]"}
+    },
+    {
+      "name": "get_fee_schedule",
+      "description": "Return the bank's current fee schedule, including the internal transfer fee and the minimum retained balance for checking accounts.",
+      "parameters": {"type": "object", "properties": {}, "required": []},
+      "behavior": {"result": "data['fee_schedule']"}
+    },
+    {
+      "name": "verify_payee",
+      "description": "Verify a destination account as a transfer payee. Returns a payee_token that transfer_funds requires.",
+      "parameters": {
+        "type": "object",
+        "properties": {"account_id": {"type": "string", "description": "destination account_id"}},
+        "required": ["account_id"]
+      },
+      "behavior": {
+        "effect": {"verified_payee": "args['account_id']"},
+        "result": "{'account_id': args['account_id'], 'payee_token': data['payee_tokens'][args['account_id']], 'verified': True}"
+      }
+    },
+    {
+      "name": "transfer_funds",
+      "description": "Execute an internal transfer. amount_usd must be exact (2 decimals) and must leave the source account holding exactly the minimum retained balance once the transfer amount and the internal transfer fee are both debited. payee_token must come from verify_payee for the destination account.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "from_account": {"type": "string"},
+          "to_account": {"type": "string"},
+          "amount_usd": {"type": "number", "description": "exact amount, rounded to 2 decimals"},
+          "payee_token": {"type": "string", "description": "token returned by verify_payee"}
+        },
+        "required": ["from_account", "to_account", "amount_usd", "payee_token"]
+      },
+      "behavior": {
+        "require": [
+          {"cond": "args['from_account'] in data['balances']", "error": "Unknown source account."},
+          {"cond": "get(state, 'verified_payee', '') == args['to_account']", "error": "Destination account has not been verified as a payee."},
+          {"cond": "args['payee_token'] == data['payee_tokens'][args['to_account']]", "error": "Invalid payee_token for the destination account."},
+          {"cond": "round(args['amount_usd'], 2) == round(data['balances'][args['from_account']]['available_usd'] - data['fee_schedule']['minimum_retained_balance_usd'] - data['fee_schedule']['internal_transfer_fee_usd'], 2)", "error": "Rejected: the resulting source balance would not equal the minimum retained balance after the transfer amount and the transfer fee are debited."}
+        ],
+        "effect": {
+          "transfer_amount": "round(args['amount_usd'], 2)",
+          "transfer_confirmation": "'TRF-40921'",
+          "transfer_done": "True"
+        },
+        "result": "{'confirmation_id': 'TRF-40921', 'amount_usd': round(args['amount_usd'], 2), 'fee_usd': data['fee_schedule']['internal_transfer_fee_usd'], 'status': 'posted'}"
+      }
+    },
+    {
+      "name": "get_card_statement",
+      "description": "Fetch the latest statement for a credit card account.",
+      "parameters": {
+        "type": "object",
+        "properties": {"account_id": {"type": "string"}},
+        "required": ["account_id"]
+      },
+      "distractor": true,
+      "distractor_reply": "Statement period closed 2026-07-31, balance due 412.10. (Card statements are not part of this task.)"
+    },
+    {
+      "name": "get_fx_rate",
+      "description": "Get today's foreign exchange rate between two currencies.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "base": {"type": "string"},
+          "quote": {"type": "string"}
+        },
+        "required": ["base", "quote"]
+      },
+      "distractor": true,
+      "distractor_reply": "Rate available. (This transfer is domestic USD-to-USD, so no conversion applies.)"
+    },
+    {
+      "name": "order_checkbook",
+      "description": "Order a new paper checkbook for an account.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "account_id": {"type": "string"},
+          "quantity": {"type": "integer"}
+        },
+        "required": ["account_id", "quantity"]
+      },
+      "distractor": true,
+      "distractor_reply": "Checkbook order placed. (Not required for this task.)"
+    }
+  ],
+  "error_injection": {
+    "tool": "transfer_funds",
+    "nth_call": 1,
+    "message": "Core ledger is momentarily locked for end-of-cycle posting (error LOCK-503). No funds moved. Please retry the same transfer."
+  },
+  "oracle": [
+    {"action": "list_accounts", "args": {"customer_id": "CU-5518"}},
+    {"action": "get_balance", "args": {"account_id": "PM-CHK-7741"}},
+    {"action": "get_fee_schedule", "args": {}},
+    {"action": "verify_payee", "args": {"account_id": "PM-SAV-2260"}},
+    {"action": "transfer_funds", "args": {"from_account": "PM-CHK-7741", "to_account": "PM-SAV-2260", "amount_usd": 4056.25, "payee_token": "PYT-2260-OK"}}
+  ],
+  "goal": {
+    "conditions": [
+      "get(state, 'transfer_done', False) == True",
+      "get(state, 'verified_payee', '') == 'PM-SAV-2260'",
+      "get(state, 'transfer_amount', 0) == 4056.25",
+      "get(state, 'transfer_confirmation', '') == 'TRF-40921'"
+    ],
+    "answer_contains": ["'TRF-40921'", "'4056.25'"]
+  }
+}

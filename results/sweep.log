@@ -1,0 +1,89 @@
+[start] qwen3-1.7b bf16
+  t1 constrained=False: 109s
+  t2 constrained=False rep=0: 151s
+  t2 constrained=False rep=1: 149s
+  t1 constrained=True: 122s
+  t2 constrained=True rep=0: 141s
+  t2 constrained=True rep=1: 139s
+[done] qwen3-1.7b bf16 ¡æ qwen3-1.7b_bf16.jsonl (peak VRAM 4402 MiB)
+[start] qwen3-1.7b Q8_0
+  t1 constrained=False: 71s
+  t2 constrained=False rep=0: 94s
+  t2 constrained=False rep=1: 96s
+  t1 constrained=True: 74s
+  t2 constrained=True rep=0: 92s
+  t2 constrained=True rep=1: 92s
+[done] qwen3-1.7b Q8_0 ¡æ qwen3-1.7b_Q8_0.jsonl (peak VRAM 2798 MiB)
+[start] qwen3-1.7b Q4_K_M
+  t1 constrained=False: 59s
+  t2 constrained=False rep=0: 95s
+  t2 constrained=False rep=1: 96s
+  t1 constrained=True: 60s
+  t2 constrained=True rep=0: 92s
+  t2 constrained=True rep=1: 90s
+[done] qwen3-1.7b Q4_K_M ¡æ qwen3-1.7b_Q4_K_M.jsonl (peak VRAM 2106 MiB)
+[start] qwen3-1.7b Q3_K_M
+  t1 constrained=False: 65s
+  t2 constrained=False rep=0: 96s
+  t2 constrained=False rep=1: 97s
+  t1 constrained=True: 65s
+  t2 constrained=True rep=0: 91s
+  t2 constrained=True rep=1: 90s
+[done] qwen3-1.7b Q3_K_M ¡æ qwen3-1.7b_Q3_K_M.jsonl (peak VRAM 1948 MiB)
+[start] qwen3-4b bf16
+  t1 constrained=False: 746s
+  t2 constrained=False rep=0: 1877s
+  t2 constrained=False rep=1: 1838s
+  t1 constrained=True: 751s
+  t2 constrained=True rep=0: 1892s
+  t2 constrained=True rep=1: 1871s
+[done] qwen3-4b bf16 ¡æ qwen3-4b_bf16.jsonl (peak VRAM 7822 MiB)
+[start] qwen3-4b Q8_0
+  t1 constrained=False: 109s
+  t2 constrained=False rep=0: 179s
+  t2 constrained=False rep=1: 174s
+  t1 constrained=True: 111s
+  t2 constrained=True rep=0: 179s
+  t2 constrained=True rep=1: 174s
+[done] qwen3-4b Q8_0 ¡æ qwen3-4b_Q8_0.jsonl (peak VRAM 5414 MiB)
+[start] qwen3-4b Q4_K_M
+  t1 constrained=False: 95s
+  t2 constrained=False rep=0: 162s
+  t2 constrained=False rep=1: 162s
+  t1 constrained=True: 98s
+  t2 constrained=True rep=0: 164s
+  t2 constrained=True rep=1: 162s
+[done] qwen3-4b Q4_K_M ¡æ qwen3-4b_Q4_K_M.jsonl (peak VRAM 3714 MiB)
+[start] qwen3-4b Q3_K_M
+  t1 constrained=False: 102s
+  t2 constrained=False rep=0: 182s
+  t2 constrained=False rep=1: 187s
+  t1 constrained=True: 104s
+  t2 constrained=True rep=0: 186s
+  t2 constrained=True rep=1: 188s
+[done] qwen3-4b Q3_K_M ¡æ qwen3-4b_Q3_K_M.jsonl (peak VRAM 3312 MiB)
+[start] llama-3.1-8b Q8_0
+  t1 constrained=False: 525s
+  t2 constrained=False rep=0: 1719s
+  t2 constrained=False rep=1: 1602s
+  t1 constrained=True: 519s
+  t2 constrained=True rep=0: 1229s
+  t2 constrained=True rep=1: 1125s
+[done] llama-3.1-8b Q8_0 ¡æ llama-3.1-8b_Q8_0.jsonl (peak VRAM 7818 MiB)
+[start] llama-3.1-8b Q4_K_M
+  t1 constrained=False: 117s
+  t2 constrained=False rep=0: 205s
+  t2 constrained=False rep=1: 187s
+  t1 constrained=True: 130s
+  t2 constrained=True rep=0: 184s
+  t2 constrained=True rep=1: 164s
+[done] llama-3.1-8b Q4_K_M ¡æ llama-3.1-8b_Q4_K_M.jsonl (peak VRAM 5648 MiB)
+[start] llama-3.1-8b Q3_K_M
+  t1 constrained=False: 127s
+  t2 constrained=False rep=0: 207s
+  t2 constrained=False rep=1: 208s
+  t1 constrained=True: 133s
+  t2 constrained=True rep=0: 189s
+  t2 constrained=True rep=1: 174s
+[done] llama-3.1-8b Q3_K_M ¡æ llama-3.1-8b_Q3_K_M.jsonl (peak VRAM 4901 MiB)
+SWEEP COMPLETE
