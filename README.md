@@ -73,9 +73,14 @@ success. Llama-3.1-8B at Q8_0 (8.54 GB) shows the same collapse, 8.1 tok/s at 7.
 fails and Q3_K_M passes. We report this as an open anomaly rather than a finding,
 because **precision is confounded with memory pressure**: Q8_0 is the only 8B cell that
 does not fit in 8 GB. It is not a harness artifact — zero server errors, zero truncated
-generations, no step-budget exhaustion, near-deterministic runs. A diagnostic re-running
-Q8_0 at a smaller context is the cheapest way to separate the explanations; see
-`DEVIATIONS.md`. Until it lands, treat the 8B ordering as uninterpreted.
+generations, no step-budget exhaustion, near-deterministic runs. A post-hoc diagnostic
+re-ran Q8_0 with the context window halved (8192 → 4096) and reproduced the outcome
+counts **bit-for-bit** (T2 18/40 in both arms) with peak VRAM essentially unchanged
+(7818 → 7827 MiB), so the KV-cache share of memory pressure is ruled out; the weights
+themselves are the binding constraint (`DEVIATIONS.md` D5). What remains confounded is
+precision versus weight-level memory pressure, which only a run on a larger GPU (or an
+intermediate Q6_K cell) can separate. The anomaly stays open, and the 8B ordering is
+reported but not interpreted.
 
 ## Results table
 
